@@ -5,7 +5,7 @@ import os
 import json
 
 CONFIG_PATH = "config/honeypot_config.json"
-GUILD_ID = 1399108525954957442  # 替换为你的测试服务器ID
+GUILD_ID =   # 替换为你的测试服务器ID
 GUILD_OBJ = discord.Object(id=GUILD_ID)
 
 def load_config():
