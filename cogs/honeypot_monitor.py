@@ -23,6 +23,21 @@ class HoneypotMonitor(commands.Cog):
         if message.author.bot:
             return
 
+        keyword_triggers = {
+            "蛤？": "你在说什么？",
+            "喵": "喵喵喵~",
+            "菜包": "谁叫我？",
+            "破防": "我破防了",
+            "谁是菜包作者？": "那肯定是世界上最帅最牛逼，智商堪比爱因斯坦的： # Linvin ！",
+            "木头草是：": "# 真正的鸽子aka咕咕咕大神aka晚期懒癌患者",
+            "Who is CaiBao?": "用英文装你m那？！",
+        }
+
+        if message.content.strip() in keyword_triggers:
+            await message.channel.send(keyword_triggers[message.content.strip()])
+            print(f"[关键词触发] {message.author}：{message.content}")
+            return  # 避免进入蜜罐检测
+
         # 只处理公会消息
         if not message.guild:
             return
@@ -136,6 +151,7 @@ class HoneypotMonitor(commands.Cog):
             print("[INFO] 已在公告频道发送违规通知")
         except Exception as e:
             print(f"[ERROR] 发送公告失败: {e}")
+
 
 async def setup(bot):
     await bot.add_cog(HoneypotMonitor(bot))
