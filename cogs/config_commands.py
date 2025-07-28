@@ -7,6 +7,7 @@ import json
 CONFIG_PATH = "config/honeypot_config.json"
 GUILD_ID = 1399108525954957442
 GUILD_OBJ = discord.Object(id=GUILD_ID)
+COUNT_FILE = "config/counting.json"
 
 def load_config():
     if not os.path.exists(CONFIG_PATH):
@@ -23,6 +24,24 @@ def get_entry(config, guild_id):
         if entry["guild_id"] == str(guild_id):
             return entry
     return None
+
+def load_all_counts():
+    if not os.path.exists(COUNT_FILE):
+        return {}
+    try:
+        with open(COUNT_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return {}
+
+def save_count(guild_id: int, channel_id: int, member_count: int):
+    data = load_all_counts()
+    data[str(guild_id)] = {
+        "channel_id": channel_id,
+        "member_count": member_count
+    }
+    with open(COUNT_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
 
 class ConfigCommands(commands.Cog):
     def __init__(self, bot):
@@ -140,12 +159,41 @@ class ConfigCommands(commands.Cog):
             await interaction.response.send_message("✅ 目前沒有任何蜜罐封禁訊息紀錄", ephemeral=True)
             return
 
-        # 限制 Discord 訊息長度（最大 2000 字）
         output = "\n".join(f"{i+1}. {t[:150].replace('`', 'ˋ')}" for i, t in enumerate(texts))
         if len(output) > 1900:
             output = output[:1900] + "\n...（內容過多已截斷）"
 
         await interaction.response.send_message(f"**All Banned Texts:**\n{output}", ephemeral=True)
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.command(name="people_counting", description="將此頻道設為顯示伺服器人數的頻道")
+    async def people_counting(self, interaction: discord.Interaction):
+        guild = interaction.guild
+        channel = interaction.channel
+
+        if not isinstance(channel, discord.TextChannel):
+            await interaction.response.send_message("❌ 此指令只能在文字頻道中使用", ephemeral=True)
+            return
+
+        member_count = guild.member_count
+        new_name = f"人數-{member_count}"
+
+        try:
+            await channel.edit(name=new_name)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ 沒有修改頻道名稱的權限", ephemeral=True)
+            return
+
+        try:
+            overwrite = channel.overwrites_for(guild.default_role)
+            overwrite.send_messages = False
+            await channel.set_permissions(guild.default_role, overwrite=overwrite)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ 沒有修改頻道權限的權限", ephemeral=True)
+            return
+
+        save_count(guild.id, channel.id, member_count)
+        await interaction.response.send_message(f"✅ 頻道名稱已更新為 `{new_name}` 並禁言所有人", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(ConfigCommands(bot))

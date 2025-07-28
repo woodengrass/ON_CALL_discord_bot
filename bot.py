@@ -28,6 +28,7 @@ async def main():
     await bot.load_extension("cogs.honeypot_monitor")
     await bot.load_extension("cogs.config_commands")
     await bot.load_extension("cogs.text_triggers")
+    await bot.load_extension("cogs.people_counting")
     await bot.start(token)
 
 asyncio.run(main())
