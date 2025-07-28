@@ -29,6 +29,8 @@ async def main():
     await bot.load_extension("cogs.config_commands")
     await bot.load_extension("cogs.text_triggers")
     await bot.load_extension("cogs.people_counting")
+    await bot.load_extension("cogs.welcome_listener")
+    await bot.load_extension("cogs.cog_load")
     await bot.start(token)
 
 asyncio.run(main())
