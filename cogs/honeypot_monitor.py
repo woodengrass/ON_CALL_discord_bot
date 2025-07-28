@@ -22,11 +22,9 @@ class HoneypotMonitor(commands.Cog):
         # 跳过机器人
         if message.author.bot:
             return
-
         # 只处理公会消息
         if not message.guild:
             return
-
         # 动态加载配置
         config = load_config()
         # 找当前服务器配置
@@ -136,6 +134,7 @@ class HoneypotMonitor(commands.Cog):
             print("[INFO] 已在公告频道发送违规通知")
         except Exception as e:
             print(f"[ERROR] 发送公告失败: {e}")
+
 
 async def setup(bot):
     await bot.add_cog(HoneypotMonitor(bot))

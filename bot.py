@@ -16,7 +16,7 @@ with open("config/honeypot_config.json", "r") as f:
 
 bot.honeypots = honeypot_config
 
-TEST_GUILD_ID = #你的服务器
+TEST_GUILD_ID = 1399108525954957442
 
 @bot.event
 async def on_ready():
@@ -28,6 +28,7 @@ async def on_ready():
 async def main():
     await bot.load_extension("cogs.honeypot_monitor")
     await bot.load_extension("cogs.config_commands")
+    await bot.load_extension("cogs.text_triggers")
     await bot.start(token)
 
 asyncio.run(main())

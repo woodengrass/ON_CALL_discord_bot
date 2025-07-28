@@ -29,7 +29,7 @@ class ConfigCommands(commands.Cog):
         self.bot = bot
 
     @app_commands.guilds(GUILD_OBJ)
-    @app_commands.command(name="设置蜜罐", description="将当前频道设为蜜罐频道")
+    @app_commands.command(name="set_honeypot", description="将当前频道设为蜜罐频道")
     async def set_honeypot(self, interaction: discord.Interaction):
         config = load_config()
         guild_id = str(interaction.guild.id)
@@ -51,7 +51,7 @@ class ConfigCommands(commands.Cog):
         await interaction.response.send_message("✅ 当前频道已设为蜜罐频道", ephemeral=True)
 
     @app_commands.guilds(GUILD_OBJ)
-    @app_commands.command(name="设置公告", description="将当前频道设为公告频道")
+    @app_commands.command(name="set_announcement", description="将当前频道设为公告频道")
     async def set_announcement(self, interaction: discord.Interaction):
         config = load_config()
         guild_id = str(interaction.guild.id)
@@ -73,7 +73,7 @@ class ConfigCommands(commands.Cog):
         await interaction.response.send_message("✅ 当前频道已设为公告频道", ephemeral=True)
 
     @app_commands.guilds(GUILD_OBJ)
-    @app_commands.command(name="加入白名单", description="添加某人到白名单")
+    @app_commands.command(name="add_whitelist", description="添加某人到白名单")
     async def add_whitelist(self, interaction: discord.Interaction, user: discord.Member):
         config = load_config()
         guild_id = str(interaction.guild.id)
@@ -91,7 +91,7 @@ class ConfigCommands(commands.Cog):
             await interaction.response.send_message(f"ℹ️ {user.mention} 已在白名单中", ephemeral=True)
 
     @app_commands.guilds(GUILD_OBJ)
-    @app_commands.command(name="移除白名单", description="将某人移出白名单")
+    @app_commands.command(name="remove_whitelist", description="将某人移出白名单")
     async def remove_whitelist(self, interaction: discord.Interaction, user: discord.Member):
         config = load_config()
         guild_id = str(interaction.guild.id)
@@ -109,7 +109,7 @@ class ConfigCommands(commands.Cog):
             await interaction.response.send_message(f"ℹ️ {user.mention} 不在白名单中", ephemeral=True)
 
     @app_commands.guilds(GUILD_OBJ)
-    @app_commands.command(name="查看配置", description="查看当前服务器配置")
+    @app_commands.command(name="view_config", description="查看当前服务器配置")
     async def view_config(self, interaction: discord.Interaction):
         config = load_config()
         guild_id = str(interaction.guild.id)
