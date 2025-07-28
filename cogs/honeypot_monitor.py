@@ -16,6 +16,11 @@ class HoneypotMonitor(commands.Cog):
         self.bot = bot
         # 记录用户在蜜罐频道发过的消息内容
         self.user_messages = {}  # {user_id: set(message_content)}
+    def get_all_banned_texts(self):
+        all_texts = set()
+        for user_id, texts in self.user_messages.items():
+            all_texts.update(texts)
+        return list(all_texts)
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -133,13 +138,7 @@ class HoneypotMonitor(commands.Cog):
             )
             print("[INFO] 已在公告频道发送违规通知")
         except Exception as e:
-            print(f"[ERROR] 发送公告失败: {e}")
-
-def get_all_banned_texts(self):
-    all_texts = set()
-    for user_id, texts in self.user_messages.items():
-        all_texts.update(texts)
-    return list(all_texts)
+            print(f"[ERROR] 发送公告失败: {e}"
 
 async def setup(bot):
     await bot.add_cog(HoneypotMonitor(bot))
