@@ -5,7 +5,7 @@ import os
 import json
 
 CONFIG_PATH = "config/honeypot_config.json"
-GUILD_ID =   # 替换为你的测试服务器ID
+GUILD_ID = 1399108525954957442
 GUILD_OBJ = discord.Object(id=GUILD_ID)
 
 def load_config():
@@ -126,6 +126,26 @@ class ConfigCommands(commands.Cog):
             f"- 白名单: {', '.join(f'<@{uid}>' for uid in entry['whitelist_ids']) or '无'}"
         )
         await interaction.response.send_message(content, ephemeral=True)
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.command(name="view_banned_texts", description="查看所有被蜜罐封禁過的訊息內容")
+    async def view_banned_texts(self, interaction: discord.Interaction):
+        monitor_cog = self.bot.get_cog("HoneypotMonitor")
+        if monitor_cog is None:
+            await interaction.response.send_message("❌ 找不到 Honeypot 模組", ephemeral=True)
+            return
+
+        texts = monitor_cog.get_all_banned_texts()
+        if not texts:
+            await interaction.response.send_message("✅ 目前沒有任何蜜罐封禁訊息紀錄", ephemeral=True)
+            return
+
+        # 限制 Discord 訊息長度（最大 2000 字）
+        output = "\n".join(f"{i+1}. {t[:150].replace('`', 'ˋ')}" for i, t in enumerate(texts))
+        if len(output) > 1900:
+            output = output[:1900] + "\n...（內容過多已截斷）"
+
+        await interaction.response.send_message(f"📄 **All Banned Texts:**\n{output}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(ConfigCommands(bot))

@@ -135,6 +135,11 @@ class HoneypotMonitor(commands.Cog):
         except Exception as e:
             print(f"[ERROR] 发送公告失败: {e}")
 
+def get_all_banned_texts(self):
+    all_texts = set()
+    for user_id, texts in self.user_messages.items():
+        all_texts.update(texts)
+    return list(all_texts)
 
 async def setup(bot):
     await bot.add_cog(HoneypotMonitor(bot))
