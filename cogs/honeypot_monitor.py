@@ -138,7 +138,7 @@ class HoneypotMonitor(commands.Cog):
             )
             print("[INFO] 已在公告频道发送违规通知")
         except Exception as e:
-            print(f"[ERROR] 发送公告失败: {e}"
+            print(f"[ERROR] 发送公告失败: {e}")
 
 async def setup(bot):
     await bot.add_cog(HoneypotMonitor(bot))

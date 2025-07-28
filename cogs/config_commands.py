@@ -145,7 +145,7 @@ class ConfigCommands(commands.Cog):
         if len(output) > 1900:
             output = output[:1900] + "\n...（內容過多已截斷）"
 
-        await interaction.response.send_message(f"📄 **All Banned Texts:**\n{output}", ephemeral=True)
+        await interaction.response.send_message(f"**All Banned Texts:**\n{output}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(ConfigCommands(bot))

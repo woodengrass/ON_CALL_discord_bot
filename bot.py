@@ -20,8 +20,7 @@ TEST_GUILD_ID = 1399108525954957442
 
 @bot.event
 async def on_ready():
-    guild = discord.Object(id=TEST_GUILD_ID)
-    guild = discord.Object(id=)  # 替换成你测试的服务器ID，int类型
+    guild = discord.Object(id=1399108525954957442)  # 替换成你测试的服务器ID，int类型
     await bot.tree.sync(guild=guild)
     print(f"✅ Slash 命令已同步到服务器，Bot 在线：{bot.user}")
 
