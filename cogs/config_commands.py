@@ -65,7 +65,7 @@ def load_welcome_config():
         return {}
     try:
         with open(WELCOME_FILE, "r", encoding="utf-8") as f:
-        return json.load(f)
+            return json.load(f)
     except json.JSONDecodeError:
         return {}
 
