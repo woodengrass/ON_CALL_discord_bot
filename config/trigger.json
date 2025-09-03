@@ -1,0 +1,22 @@
+{
+  "1403217963389161495": {
+    "triggers": {
+      "test": {
+        "response": "gg",
+        "wildcard": true
+      },
+      "123": {
+        "response": "321",
+        "wildcard": false
+      }
+    }
+  },
+  "1353379898705707079": {
+    "triggers": {
+      "114514": {
+        "response": "好時代來臨力(喜",
+        "wildcard": false
+      }
+    }
+  }
+}
