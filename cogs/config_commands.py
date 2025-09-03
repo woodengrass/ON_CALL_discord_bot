@@ -7,7 +7,7 @@ import json
 import datetime
 
 CONFIG_PATH = "config/honeypot_config.json"
-GUILD_ID = 1353379898705707079
+GUILD_ID = 你的伺服器ID
 GUILD_OBJ = discord.Object(id=GUILD_ID)
 COUNT_FILE = "config/counting.json"
 WELCOME_FILE = "config/welcome_message.json"
