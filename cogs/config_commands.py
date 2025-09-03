@@ -7,11 +7,12 @@ import json
 import datetime
 
 CONFIG_PATH = "config/honeypot_config.json"
-GUILD_ID = 1399108525954957442
+GUILD_ID = 1353379898705707079
 GUILD_OBJ = discord.Object(id=GUILD_ID)
 COUNT_FILE = "config/counting.json"
 WELCOME_FILE = "config/welcome_message.json"
 TICKET_FILE = "config/ticket.json"
+TRIGGER_FILE = "config/trigger.json"
 
 def load_config():
     if not os.path.exists(CONFIG_PATH):
@@ -84,6 +85,19 @@ def load_panels():
 
 def save_panels(data):
     with open(PANEL_FILE, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=2, ensure_ascii=False)
+
+def load_triggers():
+    if not os.path.exists(TRIGGER_FILE):
+        return {}
+    try:
+        with open(TRIGGER_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return {}
+
+def save_triggers(data):
+    with open(TRIGGER_FILE, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
 
 class ConfigCommands(commands.Cog):
@@ -315,6 +329,122 @@ class ConfigCommands(commands.Cog):
         })
         save_tickets(data)
         print(f"[ticket] 已在 {interaction.channel.id} 建立客服單面板，寫入 ticket.json")
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(name="add_trigger", description="新增自動回覆觸發詞")
+    @app_commands.describe(trigger="觸發詞", response="機器人要回覆的內容", wildcard="是否為萬用字元觸發（部分匹配）")
+    async def add_trigger(self, interaction: discord.Interaction, trigger: str, response: str, wildcard: bool = False):
+        data = load_triggers()
+        guild_id = str(interaction.guild.id)
+
+        if guild_id not in data:
+            data[guild_id] = {"triggers": {}}
+
+        data[guild_id]["triggers"][trigger] = {
+            "response": response,
+            "wildcard": wildcard
+        }
+        save_triggers(data)
+        await interaction.response.send_message(
+            f"✅ 已新增觸發詞 `{trigger}`，回覆為 `{response}`，萬用字元：{wildcard}",
+            ephemeral=True
+        )
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(name="delete_trigger", description="刪除某個自動回覆觸發詞")
+    @app_commands.describe(trigger="要刪除的觸發詞")
+    async def delete_trigger(self, interaction: discord.Interaction, trigger: str):
+        data = load_triggers()
+        guild_id = str(interaction.guild.id)
+
+        if guild_id not in data or trigger not in data[guild_id]["triggers"]:
+            await interaction.response.send_message(f"❌ 找不到觸發詞 `{trigger}`", ephemeral=True)
+            return
+
+        del data[guild_id]["triggers"][trigger]
+        save_triggers(data)
+        await interaction.response.send_message(f"🗑 已成功刪除觸發詞 `{trigger}`", ephemeral=True)
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(name="view_triggers", description="查看目前的自動回覆觸發詞")
+    async def view_triggers(self, interaction: discord.Interaction):
+        data = load_triggers()
+        guild_id = str(interaction.guild.id)
+
+        if guild_id not in data or not data[guild_id]["triggers"]:
+            await interaction.response.send_message("⚠️ 此伺服器尚未設定任何觸發詞", ephemeral=True)
+            return
+
+        lines = []
+        for trigger, val in data[guild_id]["triggers"].items():
+            wildcard = val.get("wildcard", False)
+            response = val.get("response", "⚠️ 無設定")
+            lines.append(f"`{trigger}` → {response} {'[萬用]' if wildcard else ''}")
+
+        output = "\n".join(lines)
+        if len(output) > 1900:
+            output = output[:1900] + "\n...（過長已截斷）"
+
+        await interaction.response.send_message(f"📄 **目前的觸發詞清單：**\n{output}", ephemeral=True)
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(name="set_announcement", description="設定此頻道為公告頻道（用於通報訊息刪除等）")
+    async def set_announcement(self, interaction: discord.Interaction):
+        config = load_config()
+        guild_id = str(interaction.guild.id)
+        channel_id = str(interaction.channel.id)
+        entry = get_entry(config, guild_id)
+
+        if entry:
+            entry["announcement_channel"] = channel_id
+        else:
+            entry = {
+                "guild_id": guild_id,
+                "honeypot_channel": "",
+                "announcement_channel": channel_id,
+                "whitelist_ids": [],
+                "enable_delete_log": False  # 預設不啟用刪除通報
+            }
+            config.append(entry)
+
+        save_config(config)
+        await interaction.response.send_message("✅ 此頻道已設為公告頻道", ephemeral=True)
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(name="toggle_delete_log", description="開啟或關閉刪除訊息的通報功能")
+    @app_commands.describe(enabled="是否啟用通報")
+    async def toggle_delete_log(self, interaction: discord.Interaction, enabled: bool):
+        config = load_config()
+        guild_id = str(interaction.guild.id)
+        entry = get_entry(config, guild_id)
+
+        if not entry:
+            await interaction.response.send_message("⚠️ 請先使用 /set_announcement 指令設定公告頻道", ephemeral=True)
+            return
+
+        entry["enable_delete_log"] = enabled
+        save_config(config)
+        await interaction.response.send_message(
+            f"✅ 刪除訊息通報已 {'啟用' if enabled else '關閉'}", ephemeral=True
+        )
+
+    @app_commands.guilds(GUILD_OBJ)
+    @app_commands.checks.has_permissions(administrator=True)
+    @app_commands.command(name="announcement", description="讓機器人在指定頻道發送公告訊息")
+    @app_commands.describe(channel="要發送的文字頻道", content="要發送的訊息內容")
+    async def announcement(self, interaction: discord.Interaction, channel: discord.TextChannel, content: str):
+        try:
+            await channel.send(content)
+            await interaction.response.send_message(f"✅ 已發送公告到 {channel.mention}", ephemeral=True)
+        except discord.Forbidden:
+            await interaction.response.send_message("❌ 機器人沒有在該頻道發送訊息的權限", ephemeral=True)
+        except Exception as e:
+            await interaction.response.send_message(f"❌ 發送失敗：{e}", ephemeral=True)
 
 async def setup(bot):
     await bot.add_cog(ConfigCommands(bot))
