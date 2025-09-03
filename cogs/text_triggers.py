@@ -1,19 +1,18 @@
 import discord
 from discord.ext import commands
+import json
+import os
 
-# 關鍵字對應回覆
-keyword_triggers = {
-    "蛤": "你在说什么？",
-    "喵": "喵喵喵~",
-    "破防": "我破防了",
-    "木头草": "是你爹",
-    "Who is CaiBao?": "用英文装你m那？！",
-    "蛤": "你在說什麼？",
-    "破防": "我破防了",
-    "誰是菜包作者？": "那肯定是一個真正的鴿子aka咕咕咕大神aka晚期懶癌患者",
-    "木頭草": "是你爹",
-    "01100111 01101001 01110010 01101100 01100110 01110010 01101001 01100101 01101110 01100100": "打這麼長一串幹嘛，你又沒有",
-}
+TRIGGER_FILE = "config/trigger.json"
+
+def load_triggers():
+    if not os.path.exists(TRIGGER_FILE):
+        return {}
+    try:
+        with open(TRIGGER_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except json.JSONDecodeError:
+        return {}
 
 class TextTriggers(commands.Cog):
     def __init__(self, bot):
@@ -21,14 +20,23 @@ class TextTriggers(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
-        # 忽略 bot 自己
-        if message.author.bot:
+        if message.author.bot or not message.guild:
             return
 
-        content = message.content.strip()
-        if content in keyword_triggers:
-            await message.channel.send(keyword_triggers[content])
-            print(f"[关键词触发] {message.author}：{content}")
+        data = load_triggers()
+        guild_id = str(message.guild.id)
+        content = message.content
+
+        if guild_id not in data or "triggers" not in data[guild_id]:
+            return
+
+        for trigger, config in data[guild_id]["triggers"].items():
+            response = config["response"]
+            is_wildcard = config.get("wildcard", False)
+
+            if (is_wildcard and trigger in content) or (not is_wildcard and content.strip() == trigger):
+                await message.channel.send(response)
+                break  # 只觸發第一個符合的
 
 async def setup(bot):
     await bot.add_cog(TextTriggers(bot))
