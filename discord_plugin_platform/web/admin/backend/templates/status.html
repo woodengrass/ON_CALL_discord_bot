@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% set active_nav = "status" %}
+{% block title %}狀態{% endblock %}
+{% block content %}
+<div id="banner" class="banner hidden"></div>
+
+<h2>外掛狀態總覽</h2>
+<div class="stat-grid" id="status-summary"></div>
+
+<h2>執行統計查詢</h2>
+<div class="panel">
+  <div class="field-grid">
+    <label>plugin_id<input type="text" id="stats-plugin-id-input" list="plugin-id-options"></label>
+    <label>伺服器 ID（選填）<input type="text" id="stats-guild-id-input"></label>
+    <label>起始時間 ISO（選填）<input type="text" id="stats-since-input" placeholder="2026-01-01T00:00:00"></label>
+  </div>
+  <datalist id="plugin-id-options"></datalist>
+  <button class="primary" id="load-stats-button">查詢統計</button>
+  <div id="stats-result" class="stat-grid"></div>
+  <div id="stats-outcomes"></div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadStatusSummary() {
+  await withLoading("status-summary", "載入外掛狀態...", async () => {
+    const plugins = await apiGet("/api/plugins");
+    const counts = {};
+    for (const plugin of plugins) {
+      counts[plugin.status] = (counts[plugin.status] || 0) + 1;
+    }
+    const container = document.getElementById("status-summary");
+    container.innerHTML = "";
+    container.appendChild(el("div", { class: "stat-card" }, [
+      el("div", { class: "stat-value", text: String(plugins.length) }),
+      el("div", { class: "stat-label", text: "外掛總數" }),
+    ]));
+    for (const [status, count] of Object.entries(counts)) {
+      container.appendChild(el("div", { class: "stat-card" }, [
+        el("div", { class: "stat-value", text: String(count) }),
+        statusBadge(status),
+      ]));
+    }
+
+    const datalist = document.getElementById("plugin-id-options");
+    datalist.innerHTML = "";
+    for (const plugin of plugins) {
+      datalist.appendChild(el("option", { value: plugin.plugin_id }));
+    }
+  });
+}
+
+document.getElementById("load-stats-button").addEventListener("click", async () => {
+  clearBanner("banner");
+  const pluginId = document.getElementById("stats-plugin-id-input").value.trim();
+  if (!pluginId) {
+    showError("banner", new Error("請輸入 plugin_id"));
+    return;
+  }
+  const guildId = document.getElementById("stats-guild-id-input").value.trim();
+  const since = document.getElementById("stats-since-input").value.trim();
+  const params = new URLSearchParams();
+  if (guildId) {
+    params.set("guild_id", guildId);
+  }
+  if (since) {
+    params.set("since", since);
+  }
+  const query = params.toString() ? "?" + params.toString() : "";
+  document.getElementById("stats-outcomes").innerHTML = "";
+  try {
+    const stats = await withLoading("stats-result", "查詢中...", () =>
+      apiGet("/api/plugins/" + encodeURIComponent(pluginId) + "/stats" + query)
+    );
+    const resultContainer = document.getElementById("stats-result");
+    resultContainer.innerHTML = "";
+    resultContainer.appendChild(el("div", { class: "stat-card" }, [
+      el("div", { class: "stat-value", text: String(stats.total) }),
+      el("div", { class: "stat-label", text: "總執行次數" }),
+    ]));
+    resultContainer.appendChild(el("div", { class: "stat-card" }, [
+      el("div", { class: "stat-value", text: stats.avg_execution_ms === null ? "-" : stats.avg_execution_ms.toFixed(1) + "ms" }),
+      el("div", { class: "stat-label", text: "平均耗時" }),
+    ]));
+    resultContainer.appendChild(el("div", { class: "stat-card" }, [
+      el("div", { class: "stat-value", text: stats.p95_execution_ms === null ? "-" : stats.p95_execution_ms + "ms" }),
+      el("div", { class: "stat-label", text: "p95 耗時" }),
+    ]));
+
+    const outcomesContainer = document.getElementById("stats-outcomes");
+    outcomesContainer.innerHTML = "";
+    for (const [outcome, count] of Object.entries(stats.outcome_counts)) {
+      const percentage = stats.total ? (count / stats.total) * 100 : 0;
+      outcomesContainer.appendChild(el("div", { class: "outcome-row" }, [
+        el("div", { class: "outcome-label" }, [
+          statusBadge(outcome),
+          el("span", { text: count + " 次（" + percentage.toFixed(1) + "%）" }),
+        ]),
+        el("div", { class: "outcome-bar-track" }, [
+          el("div", { class: "outcome-bar-fill", style: "width: " + percentage.toFixed(1) + "%;" }),
+        ]),
+      ]));
+    }
+  } catch (error) {
+    showError("banner", error);
+  }
+});
+
+loadStatusSummary();
+</script>
+{% endblock %}

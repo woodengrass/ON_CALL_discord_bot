@@ -55,6 +55,24 @@ MAX_SCHEDULE_DELAY_SECONDS = _get_int_setting("PLUGIN_PLATFORM_MAX_SCHEDULE_DELA
 MIN_RECURRING_INTERVAL_SECONDS = _get_int_setting("PLUGIN_PLATFORM_MIN_RECURRING_INTERVAL_SECONDS", 60)
 
 
+def _limit_value(resource_overrides: dict | None, key: str, default: int) -> int:
+    """
+    從逐安裝資源覆蓋讀取限制值，沒有覆蓋時回傳平台預設常數。
+
+    Args:
+        resource_overrides: 已解析的資源限制 dict
+        key: 資源欄位名稱
+        default: 平台預設值
+
+    Returns:
+        最終限制值
+    """
+    if resource_overrides is None:
+        return default
+    value = resource_overrides.get(key)
+    return value if isinstance(value, int) and not isinstance(value, bool) and value > 0 else default
+
+
 def _now_iso() -> str:
     """
     取得目前 UTC 時間的 ISO 格式字串。
@@ -106,7 +124,12 @@ async def storage_get(guild_id: int, plugin_id: str, key: str, db: aiosqlite.Con
 
 
 async def storage_set(
-    guild_id: int, plugin_id: str, key: str, value: Any, db: aiosqlite.Connection | None = None
+    guild_id: int,
+    plugin_id: str,
+    key: str,
+    value: Any,
+    db: aiosqlite.Connection | None = None,
+    resource_overrides: dict | None = None,
 ) -> None:
     """
     寫入外掛專屬的 KV 資料，key 已存在則覆蓋。
@@ -119,17 +142,26 @@ async def storage_set(
         db: 這次執行專用的連線（有 storage 能力時由 core/dispatcher.py 準備），
             None 代表用共用連線，交易邊界（commit／rollback）一律由呼叫端決定，
             這裡不呼叫 commit()，見 design.md 第 5.4.2 節
+        resource_overrides: 已解析的資源限制，None 代表使用平台常數
 
     Raises:
         StorageLimitExceededError: key 長度、value 大小超過上限，或這個安裝已經用滿
             MAX_STORAGE_KEYS_PER_INSTALLATION 筆資料且這是一個新 key（覆蓋既有 key 不受此限）
     """
-    if len(key) > MAX_STORAGE_KEY_LENGTH:
-        raise StorageLimitExceededError(f"key 長度超過上限（{MAX_STORAGE_KEY_LENGTH} 字元）")
+    key_length_limit = _limit_value(resource_overrides, "storage_key_length_limit", MAX_STORAGE_KEY_LENGTH)
+    value_bytes_limit = _limit_value(resource_overrides, "storage_value_bytes_limit", MAX_STORAGE_VALUE_BYTES)
+    keys_per_installation_limit = _limit_value(
+        resource_overrides,
+        "storage_keys_per_installation_limit",
+        MAX_STORAGE_KEYS_PER_INSTALLATION,
+    )
+
+    if len(key) > key_length_limit:
+        raise StorageLimitExceededError(f"key 長度超過上限（{key_length_limit} 字元）")
 
     value_json = json.dumps(value)
-    if len(value_json.encode("utf-8")) > MAX_STORAGE_VALUE_BYTES:
-        raise StorageLimitExceededError(f"value 大小超過上限（{MAX_STORAGE_VALUE_BYTES} bytes）")
+    if len(value_json.encode("utf-8")) > value_bytes_limit:
+        raise StorageLimitExceededError(f"value 大小超過上限（{value_bytes_limit} bytes）")
 
     db = db or get_db()
 
@@ -162,12 +194,12 @@ async def storage_set(
             key,
             guild_id,
             plugin_id,
-            MAX_STORAGE_KEYS_PER_INSTALLATION,
+            keys_per_installation_limit,
         ),
     )
     if cursor.rowcount == 0:
         raise StorageLimitExceededError(
-            f"這個安裝的 storage key 數量已達上限（{MAX_STORAGE_KEYS_PER_INSTALLATION} 筆）"
+            f"這個安裝的 storage key 數量已達上限（{keys_per_installation_limit} 筆）"
         )
 
 
@@ -201,6 +233,18 @@ async def delete_all_storage_for_guild(guild_id: int) -> None:
     """
     db = get_db()
     await db.execute("DELETE FROM plugin_kv_store WHERE guild_id = ?", (guild_id,))
+    await db.commit()
+
+
+async def delete_all_storage_for_plugin(plugin_id: str) -> None:
+    """
+    刪除指定外掛在所有伺服器的 KV 儲存資料，供停權/封鎖連鎖解除安裝使用。
+
+    Args:
+        plugin_id: 外掛 ID
+    """
+    db = get_db()
+    await db.execute("DELETE FROM plugin_kv_store WHERE plugin_id = ?", (plugin_id,))
     await db.commit()
 
 

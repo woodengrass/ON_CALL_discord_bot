@@ -501,3 +501,198 @@ async def test_consume_due_scheduled_tasks_limits_concurrency(monkeypatch) -> No
     await cog.consume_due_scheduled_tasks()
 
     assert max_active_count == 2
+
+
+def test_format_guild_notification_banned_with_reason() -> None:
+    text = listeners._format_guild_notification(
+        "plugin_banned", {"plugin_id": "temp_role_punishment", "reason": "abuse"}
+    )
+
+    assert "temp_role_punishment" in text
+    assert "永久封鎖" in text
+    assert "abuse" in text
+
+
+def test_format_guild_notification_banned_without_reason() -> None:
+    text = listeners._format_guild_notification("plugin_banned", {"plugin_id": "temp_role_punishment"})
+
+    assert "未提供原因" in text
+
+
+def test_format_guild_notification_suspended() -> None:
+    text = listeners._format_guild_notification("plugin_suspended", {"plugin_id": "temp_role_punishment"})
+
+    assert "temp_role_punishment" in text
+    assert "停權" in text
+
+
+def test_format_guild_notification_unknown_type_has_fallback() -> None:
+    text = listeners._format_guild_notification("something_else", {"plugin_id": "temp_role_punishment"})
+
+    assert "something_else" in text
+
+
+class FakeBotWithGuilds(FakeBot):
+    """
+    測試用 Bot，額外提供 get_guild()，供伺服器通知消費測試模擬找不到/找得到伺服器。
+    """
+
+    def __init__(self, guilds: dict[int, object]) -> None:
+        self._guilds = guilds
+
+    def get_guild(self, guild_id: int) -> object | None:
+        return self._guilds.get(guild_id)
+
+
+class FakeSystemChannel:
+    """
+    測試用系統頻道，記錄送出的訊息內容。
+    """
+
+    def __init__(self) -> None:
+        self.sent_messages: list[str] = []
+        self.should_raise = False
+
+    async def send(self, content: str) -> None:
+        if self.should_raise:
+            raise RuntimeError("discord API 暫時失敗")
+        self.sent_messages.append(content)
+
+
+async def test_consume_pending_guild_notifications_sends_and_marks_sent(monkeypatch) -> None:
+    """
+    找得到伺服器與 system_channel 時應真的送出格式化訊息，並標記通知已送出。
+    """
+    marked_sent: list[int] = []
+    channel = FakeSystemChannel()
+    guild = SimpleNamespace(system_channel=channel)
+
+    async def fake_get_pending_guild_notifications(limit: int = 100) -> list[dict]:
+        return [
+            {
+                "notification_id": 1,
+                "guild_id": 1111,
+                "notification_type": "plugin_suspended",
+                "payload_json": '{"plugin_id": "temp_role_punishment"}',
+            }
+        ]
+
+    async def fake_mark_guild_notification_sent(notification_id: int) -> bool:
+        marked_sent.append(notification_id)
+        return True
+
+    monkeypatch.setattr(listeners.repository, "get_pending_guild_notifications", fake_get_pending_guild_notifications)
+    monkeypatch.setattr(listeners.repository, "mark_guild_notification_sent", fake_mark_guild_notification_sent)
+
+    cog = listeners.PluginPlatformListeners(FakeBotWithGuilds({1111: guild}))
+
+    await cog.consume_pending_guild_notifications()
+
+    assert len(channel.sent_messages) == 1
+    assert "temp_role_punishment" in channel.sent_messages[0]
+    assert marked_sent == [1]
+
+
+async def test_consume_pending_guild_notifications_marks_sent_when_guild_not_found(monkeypatch) -> None:
+    """
+    bot 已經不在該伺服器（找不到 guild）時，不應嘗試送訊息，但仍要標記已送出，
+    避免這筆通知卡在待送佇列裡永遠重試。
+    """
+    marked_sent: list[int] = []
+
+    async def fake_get_pending_guild_notifications(limit: int = 100) -> list[dict]:
+        return [
+            {
+                "notification_id": 1,
+                "guild_id": 9999,
+                "notification_type": "plugin_suspended",
+                "payload_json": '{"plugin_id": "temp_role_punishment"}',
+            }
+        ]
+
+    async def fake_mark_guild_notification_sent(notification_id: int) -> bool:
+        marked_sent.append(notification_id)
+        return True
+
+    monkeypatch.setattr(listeners.repository, "get_pending_guild_notifications", fake_get_pending_guild_notifications)
+    monkeypatch.setattr(listeners.repository, "mark_guild_notification_sent", fake_mark_guild_notification_sent)
+
+    cog = listeners.PluginPlatformListeners(FakeBotWithGuilds({}))
+
+    await cog.consume_pending_guild_notifications()
+
+    assert marked_sent == [1]
+
+
+async def test_consume_pending_guild_notifications_marks_sent_when_no_system_channel(monkeypatch) -> None:
+    """
+    伺服器存在但沒有系統頻道時，同樣不送訊息但標記已送出，理由跟找不到伺服器一致。
+    """
+    marked_sent: list[int] = []
+    guild = SimpleNamespace(system_channel=None)
+
+    async def fake_get_pending_guild_notifications(limit: int = 100) -> list[dict]:
+        return [
+            {
+                "notification_id": 1,
+                "guild_id": 1111,
+                "notification_type": "plugin_banned",
+                "payload_json": '{"plugin_id": "temp_role_punishment", "reason": "abuse"}',
+            }
+        ]
+
+    async def fake_mark_guild_notification_sent(notification_id: int) -> bool:
+        marked_sent.append(notification_id)
+        return True
+
+    monkeypatch.setattr(listeners.repository, "get_pending_guild_notifications", fake_get_pending_guild_notifications)
+    monkeypatch.setattr(listeners.repository, "mark_guild_notification_sent", fake_mark_guild_notification_sent)
+
+    cog = listeners.PluginPlatformListeners(FakeBotWithGuilds({1111: guild}))
+
+    await cog.consume_pending_guild_notifications()
+
+    assert marked_sent == [1]
+
+
+async def test_consume_pending_guild_notifications_does_not_mark_sent_when_send_fails(monkeypatch) -> None:
+    """
+    Discord API 送訊息失敗時不該標記已送出，讓下一輪 loop 有機會重試，
+    也不該讓這筆失敗擋住同一批裡的其他通知。
+    """
+    marked_sent: list[int] = []
+    failing_channel = FakeSystemChannel()
+    failing_channel.should_raise = True
+    working_channel = FakeSystemChannel()
+    failing_guild = SimpleNamespace(system_channel=failing_channel)
+    working_guild = SimpleNamespace(system_channel=working_channel)
+
+    async def fake_get_pending_guild_notifications(limit: int = 100) -> list[dict]:
+        return [
+            {
+                "notification_id": 1,
+                "guild_id": 1111,
+                "notification_type": "plugin_suspended",
+                "payload_json": '{"plugin_id": "plugin_a"}',
+            },
+            {
+                "notification_id": 2,
+                "guild_id": 2222,
+                "notification_type": "plugin_suspended",
+                "payload_json": '{"plugin_id": "plugin_b"}',
+            },
+        ]
+
+    async def fake_mark_guild_notification_sent(notification_id: int) -> bool:
+        marked_sent.append(notification_id)
+        return True
+
+    monkeypatch.setattr(listeners.repository, "get_pending_guild_notifications", fake_get_pending_guild_notifications)
+    monkeypatch.setattr(listeners.repository, "mark_guild_notification_sent", fake_mark_guild_notification_sent)
+
+    cog = listeners.PluginPlatformListeners(FakeBotWithGuilds({1111: failing_guild, 2222: working_guild}))
+
+    await cog.consume_pending_guild_notifications()
+
+    assert marked_sent == [2]
+    assert working_channel.sent_messages == ["外掛 plugin_b 已被平台停權並自動解除安裝。"]

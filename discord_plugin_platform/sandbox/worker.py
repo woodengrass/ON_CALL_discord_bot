@@ -30,6 +30,7 @@ async def execute_plugin_event(
     event_payload: dict,
     granted_capabilities: set[str],
     execution_db: aiosqlite.Connection | None = None,
+    resource_overrides: dict | None = None,
 ) -> list[dict]:
     """
     在全新子行程執行單次外掛事件，主行程只負責服務能力 RPC 與回收行程。
@@ -43,6 +44,7 @@ async def execute_plugin_event(
         granted_capabilities: 這次安裝授權的能力旗標集合
         execution_db: 這次執行專用的資料庫連線，留在主行程端的 InProcessBackend 使用，
             不會傳進子行程，避免繞開 dispatcher 的 commit/rollback 邊界。
+        resource_overrides: 已解析的資源限制，分別提供給子行程沙箱限制與主行程 storage 限制。
 
     Returns:
         動作清單，格式見 design.md 第 3.2 節「動作清單格式」
@@ -62,6 +64,7 @@ async def execute_plugin_event(
             event_type,
             event_payload,
             granted_capabilities,
+            resource_overrides,
         ),
     )
     process.start()
@@ -73,6 +76,7 @@ async def execute_plugin_event(
         bot=get_bot(),
         event_loop=asyncio.get_running_loop(),
         execution_db=execution_db,
+        resource_overrides=resource_overrides,
     )
     rpc_task = asyncio.create_task(serve_capability_requests(parent_connection, backend))
 
@@ -106,6 +110,7 @@ def _child_process_main(
     event_type: str,
     event_payload: dict,
     granted_capabilities: set[str],
+    resource_overrides: dict | None,
 ) -> None:
     """
     子行程進入點：建立 Lua VM、綁定 RpcBackend、執行外掛並回傳最終結果。
@@ -118,6 +123,7 @@ def _child_process_main(
         event_type: 要呼叫的事件處理函式名稱
         event_payload: 事件資料
         granted_capabilities: 已授權能力集合
+        resource_overrides: 已解析的資源限制
     """
     try:
         context = ExecutionContext(
@@ -126,7 +132,10 @@ def _child_process_main(
             granted_capabilities=granted_capabilities,
             backend=RpcBackend(connection),
         )
-        runtime = create_sandbox_runtime()
+        runtime = create_sandbox_runtime(
+            instruction_limit=(resource_overrides or {}).get("instruction_limit"),
+            memory_limit_bytes=(resource_overrides or {}).get("memory_limit_bytes"),
+        )
         bind_capabilities(runtime, context)
         execute_untrusted_code(runtime, source_code)
         run_with_limits(runtime, event_type, event_payload)

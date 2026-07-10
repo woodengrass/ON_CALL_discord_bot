@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <title>{% block title %}外掛平台後台{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>外掛平台後台</h1>
+    <nav class="main-nav">
+      <a href="/plugins" class="{{ 'active' if active_nav == 'plugins' else '' }}">外掛</a>
+      <a href="/guilds" class="{{ 'active' if active_nav == 'guilds' else '' }}">伺服器</a>
+      <a href="/status" class="{{ 'active' if active_nav == 'status' else '' }}">狀態</a>
+      <a href="/docs">API 文件</a>
+    </nav>
+  </header>
+  {% block content %}{% endblock %}
+  <script src="/static/app.js"></script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

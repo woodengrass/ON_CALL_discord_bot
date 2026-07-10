@@ -39,6 +39,29 @@ async def test_storage_set_rejects_key_over_length_limit(temp_db):
         await plugin_storage_repository.storage_set(1, "plugin_a", "x" * (MAX_STORAGE_KEY_LENGTH + 1), 1)
 
 
+async def test_storage_set_uses_resource_override_limits(temp_db, monkeypatch):
+    """
+    storage_set() 應優先套用 dispatcher 解析後傳入的安裝資源限制，而不是只看平台常數。
+    """
+    monkeypatch.setattr(plugin_storage_repository, "MAX_STORAGE_KEY_LENGTH", 10)
+    await plugin_storage_repository.storage_set(
+        1,
+        "plugin_a",
+        "x" * 12,
+        1,
+        resource_overrides={"storage_key_length_limit": 20},
+    )
+
+    with pytest.raises(StorageLimitExceededError, match="key 長度"):
+        await plugin_storage_repository.storage_set(
+            1,
+            "plugin_a",
+            "x" * 12,
+            1,
+            resource_overrides={"storage_key_length_limit": 5},
+        )
+
+
 async def test_storage_set_rejects_value_over_size_limit(temp_db):
     oversized_value = "x" * (MAX_STORAGE_VALUE_BYTES + 1)
     with pytest.raises(StorageLimitExceededError, match="value 大小"):

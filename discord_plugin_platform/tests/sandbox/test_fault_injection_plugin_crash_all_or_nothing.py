@@ -141,7 +141,12 @@ async def test_dispatch_event_rolls_back_storage_when_real_subprocess_crashes_af
         end
         """
 
-    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+    async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
+        return {"execution_quota": 60, "action_quota": 30}
+
+    async def fake_check_and_consume_execution_quota(
+        guild_id: int, plugin_id: str, limit_override: int | None = None
+    ) -> bool:
         return True
 
     logged_entries: list[dict] = []
@@ -153,6 +158,7 @@ async def test_dispatch_event_rolls_back_storage_when_real_subprocess_crashes_af
         dispatcher.repository, "get_enabled_installations_for_guild", fake_get_enabled_installations_for_guild
     )
     monkeypatch.setattr(dispatcher.repository, "get_plugin_source", fake_get_plugin_source)
+    monkeypatch.setattr(dispatcher.repository, "resolve_resource_limits", fake_resolve_resource_limits)
     monkeypatch.setattr(dispatcher.repository, "log_execution", fake_log_execution)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_execution_quota", fake_check_and_consume_execution_quota)
     monkeypatch.setattr(dispatcher.suspension, "is_suspended", lambda plugin_id: False)

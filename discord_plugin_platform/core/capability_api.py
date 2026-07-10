@@ -166,6 +166,7 @@ class InProcessBackend:
     bot: discord.Client
     event_loop: asyncio.AbstractEventLoop
     execution_db: aiosqlite.Connection | None = None
+    resource_overrides: dict | None = None
 
     def run_coroutine_sync(self, coro: Any) -> Any:
         """
@@ -291,7 +292,14 @@ class InProcessBackend:
         寫入本安裝專屬 storage。
         """
         self.run_coroutine_sync(
-            plugin_storage_repository.storage_set(self.guild_id, self.plugin_id, key, value, db=self.execution_db)
+            plugin_storage_repository.storage_set(
+                self.guild_id,
+                self.plugin_id,
+                key,
+                value,
+                db=self.execution_db,
+                resource_overrides=self.resource_overrides,
+            )
         )
 
     def storage_delete(self, key: str) -> None:

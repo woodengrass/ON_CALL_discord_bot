@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+{% set active_nav = "plugins" %}
+{% block title %}外掛{% endblock %}
+{% block content %}
+<div class="layout">
+  <div class="sidebar">
+    <div class="panel">
+      <input type="text" id="search-input" class="search-input" placeholder="搜尋 plugin_id 或名稱...">
+      <label>
+        依狀態篩選
+        <select id="status-filter">
+          <option value="">全部</option>
+          <option value="pending_review">待審核</option>
+          <option value="approved">已核准</option>
+          <option value="rejected">已退回</option>
+          <option value="suspended">已停權</option>
+          <option value="banned">已封鎖</option>
+        </select>
+      </label>
+    </div>
+    <div id="plugins-list"></div>
+  </div>
+  <div class="main">
+    <div id="banner" class="banner hidden"></div>
+    <div id="plugin-detail"><p class="empty-state">從左側選擇一個外掛查看詳情。</p></div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+let allTiers = [];
+let resourceDefaults = {};
+let currentPluginsCache = [];
+
+const RESOURCE_LIMIT_KEYS = [
+  "storage_key_length_limit",
+  "storage_value_bytes_limit",
+  "storage_keys_per_installation_limit",
+  "instruction_limit",
+  "memory_limit_bytes",
+];
+const ALL_TIER_FIELDS = ["execution_quota", "action_quota", ...RESOURCE_LIMIT_KEYS];
+
+function renderPluginList() {
+  const container = document.getElementById("plugins-list");
+  const query = document.getElementById("search-input").value.trim().toLowerCase();
+  const filtered = currentPluginsCache.filter(
+    (plugin) => !query || plugin.plugin_id.toLowerCase().includes(query) || plugin.name.toLowerCase().includes(query)
+  );
+  container.innerHTML = "";
+  if (filtered.length === 0) {
+    container.appendChild(el("p", { class: "empty-state", text: "沒有符合條件的外掛。" }));
+    return;
+  }
+  const selected = getSelectedParam("id");
+  for (const plugin of filtered) {
+    container.appendChild(el("a", {
+      class: "list-item" + (plugin.plugin_id === selected ? " active" : ""),
+      onclick: (event) => {
+        event.preventDefault();
+        selectPlugin(plugin.plugin_id);
+      },
+      href: "?id=" + encodeURIComponent(plugin.plugin_id),
+    }, [
+      el("div", { class: "list-item-title", text: plugin.plugin_id }),
+      el("div", { class: "list-item-meta" }, [
+        statusBadge(plugin.status),
+        el("span", { text: plugin.name + " · " + plugin.pricing_tier }),
+      ]),
+    ]));
+  }
+}
+
+async function loadPluginList() {
+  const status = document.getElementById("status-filter").value;
+  const query = status ? "?status=" + encodeURIComponent(status) : "";
+  currentPluginsCache = await apiGet("/api/plugins" + query);
+  renderPluginList();
+}
+
+function buildTierConfigFieldset(tier, existingConfig) {
+  const config = existingConfig || { allowed: true, ...resourceDefaults };
+  const allowedInput = el("input", {
+    type: "checkbox", "data-field": "allowed",
+    ...(config.allowed ? { checked: "checked" } : {}),
+  });
+  const fields = [el("label", { text: "允許安裝" }, [allowedInput])];
+  for (const key of ALL_TIER_FIELDS) {
+    const value = config[key];
+    fields.push(el("label", { text: key }, [
+      el("input", {
+        type: "number", "data-field": key, class: "tier-field",
+        placeholder: "留空使用平台預設值",
+        ...(value !== undefined && value !== null ? { value: String(value) } : {}),
+      }),
+    ]));
+  }
+  return el("fieldset", { "data-tier": tier.tier_name }, [
+    el("legend", { text: "方案：" + tier.tier_name }),
+    el("div", { class: "field-grid" }, fields),
+  ]);
+}
+
+function collectTierConfig(fieldset) {
+  const config = { allowed: fieldset.querySelector('[data-field="allowed"]').checked };
+  for (const key of ALL_TIER_FIELDS) {
+    const input = fieldset.querySelector(`[data-field="${key}"]`);
+    config[key] = input.value === "" ? null : Number(input.value);
+  }
+  return config;
+}
+
+async function renderPluginDetail(plugin) {
+  const container = document.getElementById("plugin-detail");
+  container.innerHTML = "";
+
+  container.appendChild(el("div", {}, [
+    el("h2", { text: plugin.plugin_id }),
+    statusBadge(plugin.status),
+    el("span", { text: " " + plugin.name + " (v" + plugin.latest_version + ", author " + plugin.author_id + ")" }),
+  ]));
+
+  const pricingSelect = el("select", { id: "pricing-tier-select" }, [
+    el("option", { value: "free", text: "free" }),
+    el("option", { value: "paid", text: "paid" }),
+  ]);
+  pricingSelect.value = plugin.pricing_tier;
+  container.appendChild(el("div", { class: "panel" }, [
+    el("label", { text: "計價分類" }, [pricingSelect]),
+    el("button", {
+      text: "儲存計價分類",
+      onclick: async () => {
+        try {
+          await apiPost("/api/plugins/" + encodeURIComponent(plugin.plugin_id) + "/pricing-tier", {
+            pricing_tier: pricingSelect.value,
+          });
+          showSuccess("banner", "已更新計價分類。");
+          await selectPlugin(plugin.plugin_id);
+        } catch (error) {
+          showError("banner", error);
+        }
+      },
+    }),
+  ]));
+
+  container.appendChild(el("details", { class: "panel" }, [
+    el("summary", { text: "Manifest / 要求能力 / 原始碼" }),
+    el("p", { text: "要求能力：" + (plugin.required_capabilities.join(", ") || "無") }),
+    el("div", { class: "pre-block", text: plugin.manifest_json }),
+    el("div", { class: "pre-block", text: plugin.source_code }),
+  ]));
+
+  if (plugin.status === "pending_review") {
+    const fieldsets = allTiers.map((tier) => buildTierConfigFieldset(tier, null));
+    container.appendChild(el("div", { class: "panel" }, [
+      el("h3", { text: "核准（逐方案填資源設定，已預先帶入平台預設值，可依需要調整）" }),
+      ...fieldsets,
+      el("button", {
+        class: "primary",
+        text: "核准外掛",
+        onclick: async () => {
+          const tierConfigs = {};
+          for (const fieldset of fieldsets) {
+            tierConfigs[fieldset.getAttribute("data-tier")] = collectTierConfig(fieldset);
+          }
+          try {
+            await apiPost("/api/plugins/" + encodeURIComponent(plugin.plugin_id) + "/approve", {
+              tier_configs: tierConfigs,
+            });
+            showSuccess("banner", "已核准外掛。");
+            await Promise.all([loadPluginList(), selectPlugin(plugin.plugin_id)]);
+          } catch (error) {
+            showError("banner", error);
+          }
+        },
+      }),
+    ]));
+
+    const flaggedCheckboxes = plugin.required_capabilities.map((capability) =>
+      el("label", { text: capability }, [el("input", { type: "checkbox", value: capability, class: "flagged-cap" })])
+    );
+    const presetsInput = el("input", { type: "text", placeholder: "以逗號分隔，例如 insecure,unclear_purpose" });
+    const customReasonInput = el("textarea", {});
+    container.appendChild(el("div", { class: "panel" }, [
+      el("h3", { text: "退回" }),
+      el("label", { text: "退回原因 preset（以逗號分隔）" }, [presetsInput]),
+      el("label", { text: "自由文字原因" }, [customReasonInput]),
+      ...flaggedCheckboxes.length ? [el("p", { text: "有疑慮的能力：" }), ...flaggedCheckboxes] : [],
+      el("button", {
+        class: "danger",
+        text: "退回外掛",
+        onclick: async () => {
+          const confirmed = await confirmDialog("確定要退回「" + plugin.plugin_id + "」嗎？", {
+            confirmLabel: "退回", danger: true,
+          });
+          if (!confirmed) {
+            return;
+          }
+          const presets = presetsInput.value.split(",").map((p) => p.trim()).filter((p) => p.length > 0);
+          const flagged = Array.from(document.querySelectorAll(".flagged-cap:checked")).map((c) => c.value);
+          try {
+            await apiPost("/api/plugins/" + encodeURIComponent(plugin.plugin_id) + "/reject", {
+              reason_presets: presets,
+              custom_reason: customReasonInput.value || null,
+              flagged_capabilities: flagged,
+            });
+            showSuccess("banner", "已退回外掛。");
+            await Promise.all([loadPluginList(), selectPlugin(plugin.plugin_id)]);
+          } catch (error) {
+            showError("banner", error);
+          }
+        },
+      }),
+    ]));
+  }
+
+  if (plugin.status === "approved" || plugin.status === "suspended") {
+    const quotaPanel = el("div", { class: "panel" }, [el("h3", { text: "各方案配額 / 資源設定" })]);
+    container.appendChild(quotaPanel);
+    for (const tier of allTiers) {
+      const existing = await apiGet(
+        "/api/tiers/" + encodeURIComponent(tier.tier_name) + "/plugins/" + encodeURIComponent(plugin.plugin_id)
+      ).catch(() => null);
+      const fieldset = buildTierConfigFieldset(tier, existing);
+      fieldset.appendChild(el("button", {
+        text: "儲存此方案設定",
+        onclick: async () => {
+          try {
+            await apiPut(
+              "/api/tiers/" + encodeURIComponent(tier.tier_name) + "/plugins/" + encodeURIComponent(plugin.plugin_id),
+              collectTierConfig(fieldset)
+            );
+            showSuccess("banner", "已更新 " + tier.tier_name + " 方案設定。");
+          } catch (error) {
+            showError("banner", error);
+          }
+        },
+      }));
+      quotaPanel.appendChild(fieldset);
+    }
+  }
+
+  container.appendChild(el("div", { class: "panel" }, [
+    el("h3", { text: "操作" }),
+    el("button", {
+      class: "primary",
+      text: "全域停權",
+      onclick: async () => {
+        const confirmed = await confirmDialog(
+          "確定要停權「" + plugin.plugin_id + "」嗎？所有伺服器的安裝都會被移除，最多約 10 秒後 bot 端生效。",
+          { confirmLabel: "停權", danger: true }
+        );
+        if (confirmed) {
+          await runAction(plugin.plugin_id, "suspend");
+        }
+      },
+    }),
+    el("button", { text: "解除停權", onclick: () => runAction(plugin.plugin_id, "unsuspend") }),
+    el("button", {
+      class: "danger",
+      text: "永久封鎖",
+      onclick: async () => {
+        const reason = await promptText("封鎖原因（會顯示給提交者）：", "例如：違反服務條款");
+        if (reason === null || reason.trim() === "") {
+          return;
+        }
+        try {
+          await apiPost("/api/plugins/" + encodeURIComponent(plugin.plugin_id) + "/ban", { reason });
+          showSuccess("banner", "已永久封鎖外掛。");
+          await Promise.all([loadPluginList(), selectPlugin(plugin.plugin_id)]);
+        } catch (error) {
+          showError("banner", error);
+        }
+      },
+    }),
+    el("button", { text: "解除封鎖", onclick: () => runAction(plugin.plugin_id, "unban") }),
+  ]));
+}
+
+async function runAction(pluginId, action) {
+  try {
+    await apiPost("/api/plugins/" + encodeURIComponent(pluginId) + "/" + action);
+    showSuccess("banner", "操作完成。");
+    await Promise.all([loadPluginList(), selectPlugin(pluginId)]);
+  } catch (error) {
+    showError("banner", error);
+  }
+}
+
+async function selectPlugin(pluginId) {
+  setSelectedParam("id", pluginId);
+  clearBanner("banner");
+  try {
+    await withLoading("plugin-detail", "載入外掛詳情...", async () => {
+      const plugin = await apiGet("/api/plugins/" + encodeURIComponent(pluginId));
+      await renderPluginDetail(plugin);
+    });
+    renderPluginList();
+  } catch (error) {
+    showError("banner", error);
+  }
+}
+
+async function init() {
+  document.getElementById("status-filter").addEventListener("change", loadPluginList);
+  document.getElementById("search-input").addEventListener("input", debounce(renderPluginList, 150));
+  [allTiers, resourceDefaults] = await Promise.all([apiGet("/api/tiers"), apiGet("/api/tiers/resource-defaults")]);
+  await loadPluginList();
+  const selected = getSelectedParam("id");
+  if (selected) {
+    await selectPlugin(selected);
+  }
+}
+
+init();
+</script>
+{% endblock %}
