@@ -51,9 +51,21 @@ async def test_submit_plugin_version_creates_plugin_and_version(plugin_database:
         "name": "temp_role_punishment",
         "latest_version": "1.0.0",
         "status": "pending_review",
+        "pricing_tier": "free",
     }
     assert source_code == "function on_message(payload) end"
     assert json.loads(manifest_json) == {"name": "temp_role_punishment"}
+
+
+async def test_set_plugin_pricing_tier(plugin_database: aiosqlite.Connection) -> None:
+    await _submit_example_plugin()
+
+    assert await repository.set_plugin_pricing_tier("temp_role_punishment", "paid") is True
+    plugin = await repository.get_plugin("temp_role_punishment")
+
+    assert plugin["pricing_tier"] == "paid"
+    with pytest.raises(ValueError, match="pricing_tier"):
+        await repository.set_plugin_pricing_tier("temp_role_punishment", "enterprise")
 
 
 async def test_submit_new_version_resets_plugin_to_pending_review(
@@ -170,8 +182,79 @@ async def test_create_and_delete_installation(plugin_database: aiosqlite.Connect
     assert installation["installed_version"] == "1.0.0"
     assert json.loads(installation["granted_capabilities_json"]) == ["manage_roles", "schedule_task"]
     assert installation["enabled"] is True
+    assert installation["resource_overrides_json"] is None
     assert await repository.delete_installation(1111, "temp_role_punishment") is True
     assert await repository.get_installation(1111, "temp_role_punishment") is None
+
+
+async def test_set_resource_overrides_validates_known_positive_integer_fields(
+    plugin_database: aiosqlite.Connection,
+) -> None:
+    await repository.create_installation(1111, "temp_role_punishment", "1.0.0", ["storage"])
+
+    assert await repository.set_resource_overrides(
+        1111,
+        "temp_role_punishment",
+        {"storage_value_bytes_limit": 128, "instruction_limit": 1000},
+    ) is True
+    installation = await repository.get_installation(1111, "temp_role_punishment")
+
+    assert json.loads(installation["resource_overrides_json"]) == {
+        "storage_value_bytes_limit": 128,
+        "instruction_limit": 1000,
+    }
+    with pytest.raises(ValueError, match="未知"):
+        await repository.set_resource_overrides(1111, "temp_role_punishment", {"unknown": 1})
+    with pytest.raises(ValueError, match="正整數"):
+        await repository.set_resource_overrides(1111, "temp_role_punishment", {"instruction_limit": 0})
+
+
+async def test_resource_tier_config_and_resolve_resource_limits(plugin_database: aiosqlite.Connection) -> None:
+    await repository.create_resource_tier("large", 10, "large guild")
+    await repository.set_guild_resource_tier(1111, "large")
+    await repository.set_plugin_tier_config(
+        "temp_role_punishment",
+        "large",
+        {
+            "allowed": True,
+            "storage_key_length_limit": 300,
+            "storage_value_bytes_limit": 400,
+            "storage_keys_per_installation_limit": 500,
+            "instruction_limit": 600,
+            "memory_limit_bytes": 700,
+        },
+    )
+    await repository.create_installation(1111, "temp_role_punishment", "1.0.0", ["storage"])
+    await repository.set_resource_overrides(1111, "temp_role_punishment", {"instruction_limit": 900})
+
+    limits = await repository.resolve_resource_limits(1111, "temp_role_punishment")
+
+    assert limits["storage_key_length_limit"] == 300
+    assert limits["storage_value_bytes_limit"] == 400
+    assert limits["storage_keys_per_installation_limit"] == 500
+    assert limits["instruction_limit"] == 900
+    assert limits["memory_limit_bytes"] == 700
+
+
+async def test_banned_plugin_cannot_be_resubmitted(plugin_database: aiosqlite.Connection) -> None:
+    await _submit_example_plugin()
+    assert await repository.ban_plugin("temp_role_punishment", "惡意行為") is True
+
+    with pytest.raises(ValueError, match="永久封鎖"):
+        await _submit_example_plugin()
+
+    assert await repository.unban_plugin("temp_role_punishment") is True
+    await repository.submit_plugin_version(
+        plugin_id="temp_role_punishment",
+        author_id=1234,
+        name="temp_role_punishment",
+        version="1.1.0",
+        manifest_json=json.dumps({"name": "temp_role_punishment"}),
+        source_code="function on_message(payload) end",
+        capability_api_version=1,
+    )
+    plugin = await repository.get_plugin("temp_role_punishment")
+    assert plugin["status"] == "pending_review"
 
 
 async def test_reinstall_keeps_original_installed_at(plugin_database: aiosqlite.Connection, monkeypatch) -> None:

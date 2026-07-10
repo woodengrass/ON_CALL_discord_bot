@@ -122,6 +122,9 @@ async def dispatch_event(
             continue
 
         granted_capabilities = set(json.loads(installation["granted_capabilities_json"]))
+        resource_limits = None
+        if "resource_overrides_json" in installation:
+            resource_limits = await repository.resolve_resource_limits(guild_id, plugin_id)
         needs_storage_transaction = bool(granted_capabilities & _STORAGE_CAPABILITY_NAMES)
         started_at = time.monotonic()
         execution_db = None
@@ -138,6 +141,7 @@ async def dispatch_event(
                         event_payload=event_payload,
                         granted_capabilities=granted_capabilities,
                         execution_db=execution_db,
+                        resource_overrides=resource_limits,
                     )
                 except Exception as error:
                     execution_ms = int((time.monotonic() - started_at) * 1000)

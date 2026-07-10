@@ -44,7 +44,10 @@ class SandboxExecutionError(Exception):
     """
 
 
-def create_sandbox_runtime() -> lua54.LuaRuntime:
+def create_sandbox_runtime(
+    instruction_limit: int | None = None,
+    memory_limit_bytes: int | None = None,
+) -> lua54.LuaRuntime:
     """
     建立一個乾淨的 Lua VM，移除所有危險全域函式，套用執行步數與記憶體限制。
 
@@ -57,20 +60,22 @@ def create_sandbox_runtime() -> lua54.LuaRuntime:
     Returns:
         設定好白名單全域環境與資源限制的 LuaRuntime
     """
+    effective_instruction_limit = instruction_limit or INSTRUCTION_LIMIT
+    effective_memory_limit_bytes = memory_limit_bytes or MEMORY_LIMIT_BYTES
     runtime = lua54.LuaRuntime(
         register_eval=False,
         register_builtins=False,
         unpack_returned_tuples=True,
     )
 
-    _install_resource_limit_hook(runtime)
-    _cap_dangerous_string_functions(runtime)
+    _install_resource_limit_hook(runtime, effective_instruction_limit, effective_memory_limit_bytes)
+    _cap_dangerous_string_functions(runtime, effective_memory_limit_bytes)
     _strip_globals_to_allowlist(runtime)
 
     return runtime
 
 
-def _cap_dangerous_string_functions(runtime: lua54.LuaRuntime) -> None:
+def _cap_dangerous_string_functions(runtime: lua54.LuaRuntime, max_single_string_allocation_bytes: int) -> None:
     """
     把 string.rep 換成一個會先檢查輸出長度上限的版本，防止單一呼叫瞬間配置
     超過 MAX_SINGLE_STRING_ALLOCATION_BYTES 的記憶體。
@@ -85,6 +90,7 @@ def _cap_dangerous_string_functions(runtime: lua54.LuaRuntime) -> None:
 
     Args:
         runtime: 尚未清空全域表的 LuaRuntime（string 函式庫本身在白名單內，不會被清空）
+        max_single_string_allocation_bytes: 單次 string.rep 可配置的最大 byte 數
     """
     cap_string_rep_code = f"""
     local raw_string_rep = string.rep
@@ -92,8 +98,8 @@ def _cap_dangerous_string_functions(runtime: lua54.LuaRuntime) -> None:
         local separator_length = sep and #sep or 0
         local repeat_count = n or 0
         local estimated_length = (#s + separator_length) * repeat_count
-        if estimated_length > {MAX_SINGLE_STRING_ALLOCATION_BYTES} then
-            error("string.rep 單次配置長度超過上限（{MAX_SINGLE_STRING_ALLOCATION_BYTES} bytes）")
+        if estimated_length > {max_single_string_allocation_bytes} then
+            error("string.rep 單次配置長度超過上限（{max_single_string_allocation_bytes} bytes）")
         end
         return raw_string_rep(s, n, sep)
     end
@@ -104,7 +110,11 @@ def _cap_dangerous_string_functions(runtime: lua54.LuaRuntime) -> None:
         raise SandboxExecutionError(f"套用 string.rep 上限失敗：{error}") from error
 
 
-def _install_resource_limit_hook(runtime: lua54.LuaRuntime) -> None:
+def _install_resource_limit_hook(
+    runtime: lua54.LuaRuntime,
+    instruction_limit: int,
+    memory_limit_bytes: int,
+) -> None:
     """
     安裝執行步數與記憶體限制的鉤子，必須在 _strip_globals_to_allowlist() 之前呼叫，
     因為這一步需要用到 debug 函式庫本身；鉤子一旦透過 debug.sethook 安裝成功，
@@ -113,11 +123,14 @@ def _install_resource_limit_hook(runtime: lua54.LuaRuntime) -> None:
 
     Args:
         runtime: 尚未清空全域表的 LuaRuntime
+        instruction_limit: 執行步數上限
+        memory_limit_bytes: 記憶體上限（bytes）
 
     Raises:
         SandboxExecutionError: 鉤子安裝失敗（不應該發生，除非 lupa／LuaJIT 版本不支援 debug.sethook）
     """
-    max_hook_calls = INSTRUCTION_LIMIT // HOOK_CHECK_INTERVAL
+    memory_limit_kb = memory_limit_bytes // 1024
+    max_hook_calls = instruction_limit // HOOK_CHECK_INTERVAL
     install_hook_code = f"""
     -- 先把 collectgarbage 存成 local 變數（鉤子閉包的 upvalue），
     -- 之後清空全域表時會把 collectgarbage 從 _G 移除，鉤子本身仍能透過這個
@@ -129,10 +142,10 @@ def _install_resource_limit_hook(runtime: lua54.LuaRuntime) -> None:
     debug.sethook(function()
         hook_calls = hook_calls + 1
         if hook_calls > {max_hook_calls} then
-            error("執行步數超過上限（{INSTRUCTION_LIMIT} 步）")
+            error("執行步數超過上限（{instruction_limit} 步）")
         end
-        if collectgarbage_ref("count") > {MEMORY_LIMIT_KB} then
-            error("記憶體用量超過上限（{MEMORY_LIMIT_KB}KB）")
+        if collectgarbage_ref("count") > {memory_limit_kb} then
+            error("記憶體用量超過上限（{memory_limit_kb}KB）")
         end
     end, "", {HOOK_CHECK_INTERVAL})
     """

@@ -1,5 +1,3 @@
-import json
-
 from bot_integration import admin_console
 
 
@@ -87,12 +85,19 @@ async def test_review_reject_keeps_quoted_reason(monkeypatch, capsys) -> None:
     """
     captured_reason = ""
 
-    async def fake_reject_plugin(plugin_id: str, reason: str) -> bool:
+    async def fake_reject_plugin_version(
+        plugin_id: str,
+        reason_presets: list[str],
+        custom_reason: str | None,
+        flagged_capabilities: list[str],
+    ) -> bool:
         nonlocal captured_reason
-        captured_reason = reason
+        assert reason_presets == []
+        assert flagged_capabilities == []
+        captured_reason = custom_reason
         return plugin_id == "temp_role_punishment"
 
-    monkeypatch.setattr(admin_console.repository, "reject_plugin", fake_reject_plugin)
+    monkeypatch.setattr(admin_console.admin_operations, "reject_plugin_version", fake_reject_plugin_version)
 
     await admin_console.handle_command('admin plugin review reject temp_role_punishment "manifest 欄位不完整"')
 
@@ -104,58 +109,23 @@ async def test_install_uses_manifest_required_capabilities(monkeypatch, capsys) 
     """
     install 指令應解析最新版本 manifest，將 required_capabilities 全部授權安裝。
     """
-    manifest_json = json.dumps(
-        {
-            "name": "temp_role_punishment",
-            "version": "1.0.0",
-            "description": "測試外掛",
-            "capability_api_version": 1,
-            "event_hooks": ["on_slash_command"],
-            "required_capabilities": ["manage_roles", "schedule_task"],
-            "slash_commands": [{"name": "temp_role", "description": "暫時調整身分組"}],
-        },
-        ensure_ascii=False,
-    )
     captured_installation: dict = {}
 
-    async def fake_get_plugin(plugin_id: str) -> dict | None:
-        return {
-            "plugin_id": plugin_id,
-            "author_id": 1234,
-            "name": "temp_role_punishment",
-            "latest_version": "1.0.0",
-            "status": "approved",
-        }
-
-    async def fake_get_plugin_manifest(plugin_id: str, version: str) -> str | None:
-        return manifest_json
-
-    async def fake_create_installation(
-        guild_id: int,
-        plugin_id: str,
-        version: str,
-        granted_capabilities: list[str],
-    ) -> None:
+    async def fake_install_plugin(guild_id: int, plugin_id: str) -> None:
         captured_installation.update(
             {
                 "guild_id": guild_id,
                 "plugin_id": plugin_id,
-                "version": version,
-                "granted_capabilities": granted_capabilities,
             }
         )
 
-    monkeypatch.setattr(admin_console.repository, "get_plugin", fake_get_plugin)
-    monkeypatch.setattr(admin_console.repository, "get_plugin_manifest", fake_get_plugin_manifest)
-    monkeypatch.setattr(admin_console.repository, "create_installation", fake_create_installation)
+    monkeypatch.setattr(admin_console.admin_operations, "install_plugin", fake_install_plugin)
 
     await admin_console.handle_command("admin plugin install 1111 temp_role_punishment")
 
     assert captured_installation == {
         "guild_id": 1111,
         "plugin_id": "temp_role_punishment",
-        "version": "1.0.0",
-        "granted_capabilities": ["manage_roles", "schedule_task"],
     }
     assert "已安裝外掛" in capsys.readouterr().out
 
@@ -164,32 +134,18 @@ async def test_install_rejects_unapproved_plugin(monkeypatch, capsys) -> None:
     """
     install 指令不得安裝尚未核准的外掛。
     """
-    create_called = False
+    install_called = False
 
-    async def fake_get_plugin(plugin_id: str) -> dict | None:
-        return {
-            "plugin_id": plugin_id,
-            "author_id": 1234,
-            "name": "temp_role_punishment",
-            "latest_version": "1.0.0",
-            "status": "pending_review",
-        }
+    async def fake_install_plugin(guild_id: int, plugin_id: str) -> None:
+        nonlocal install_called
+        install_called = True
+        raise admin_console.admin_operations.AdminOperationError("外掛尚未核准，不能安裝：temp_role_punishment")
 
-    async def fake_create_installation(
-        guild_id: int,
-        plugin_id: str,
-        version: str,
-        granted_capabilities: list[str],
-    ) -> None:
-        nonlocal create_called
-        create_called = True
-
-    monkeypatch.setattr(admin_console.repository, "get_plugin", fake_get_plugin)
-    monkeypatch.setattr(admin_console.repository, "create_installation", fake_create_installation)
+    monkeypatch.setattr(admin_console.admin_operations, "install_plugin", fake_install_plugin)
 
     await admin_console.handle_command("admin plugin install 1111 temp_role_punishment")
 
-    assert create_called is False
+    assert install_called is True
     assert "尚未核准" in capsys.readouterr().out
 
 
@@ -200,7 +156,7 @@ async def test_suspend_refreshes_suspension_cache(monkeypatch, capsys) -> None:
     refresh_called = False
     fake_database = object()
 
-    async def fake_suspend_plugin(plugin_id: str) -> bool:
+    async def fake_request_suspend(plugin_id: str) -> bool:
         return plugin_id == "temp_role_punishment"
 
     async def fake_refresh_from_database(database_connection: object) -> None:
@@ -208,7 +164,7 @@ async def test_suspend_refreshes_suspension_cache(monkeypatch, capsys) -> None:
         assert database_connection is fake_database
         refresh_called = True
 
-    monkeypatch.setattr(admin_console.repository, "suspend_plugin", fake_suspend_plugin)
+    monkeypatch.setattr(admin_console.admin_operations, "request_suspend", fake_request_suspend)
     monkeypatch.setattr(admin_console.suspension, "refresh_from_database", fake_refresh_from_database)
     monkeypatch.setattr(admin_console, "get_db", lambda: fake_database)
 
@@ -226,7 +182,7 @@ async def test_unsuspend_refreshes_suspension_cache(monkeypatch, capsys) -> None
     refresh_called = False
     fake_database = object()
 
-    async def fake_unsuspend_plugin(plugin_id: str) -> bool:
+    async def fake_request_unsuspend(plugin_id: str) -> bool:
         return plugin_id == "temp_role_punishment"
 
     async def fake_refresh_from_database(database_connection: object) -> None:
@@ -234,7 +190,7 @@ async def test_unsuspend_refreshes_suspension_cache(monkeypatch, capsys) -> None
         assert database_connection is fake_database
         refresh_called = True
 
-    monkeypatch.setattr(admin_console.repository, "unsuspend_plugin", fake_unsuspend_plugin)
+    monkeypatch.setattr(admin_console.admin_operations, "request_unsuspend", fake_request_unsuspend)
     monkeypatch.setattr(admin_console.suspension, "refresh_from_database", fake_refresh_from_database)
     monkeypatch.setattr(admin_console, "get_db", lambda: fake_database)
 
@@ -245,10 +201,10 @@ async def test_unsuspend_refreshes_suspension_cache(monkeypatch, capsys) -> None
 
 
 async def test_unsuspend_missing_plugin_reports_not_found(monkeypatch, capsys) -> None:
-    async def fake_unsuspend_plugin(plugin_id: str) -> bool:
+    async def fake_request_unsuspend(plugin_id: str) -> bool:
         return False
 
-    monkeypatch.setattr(admin_console.repository, "unsuspend_plugin", fake_unsuspend_plugin)
+    monkeypatch.setattr(admin_console.admin_operations, "request_unsuspend", fake_request_unsuspend)
 
     await admin_console.handle_command("admin plugin unsuspend does_not_exist")
 
@@ -261,7 +217,7 @@ async def test_quota_set_updates_installation_override(monkeypatch, capsys) -> N
     """
     captured_quota: dict = {}
 
-    async def fake_set_installation_quota_override(
+    async def fake_set_quota_override(
         guild_id: int,
         plugin_id: str,
         execution_quota: int | None,
@@ -278,9 +234,9 @@ async def test_quota_set_updates_installation_override(monkeypatch, capsys) -> N
         return True
 
     monkeypatch.setattr(
-        admin_console.repository,
-        "set_installation_quota_override",
-        fake_set_installation_quota_override,
+        admin_console.admin_operations,
+        "set_quota_override",
+        fake_set_quota_override,
     )
 
     await admin_console.handle_command(
@@ -302,7 +258,7 @@ async def test_quota_set_rejects_negative_value(monkeypatch, capsys) -> None:
     """
     update_called = False
 
-    async def fake_set_installation_quota_override(
+    async def fake_set_quota_override(
         guild_id: int,
         plugin_id: str,
         execution_quota: int | None,
@@ -313,9 +269,9 @@ async def test_quota_set_rejects_negative_value(monkeypatch, capsys) -> None:
         return True
 
     monkeypatch.setattr(
-        admin_console.repository,
-        "set_installation_quota_override",
-        fake_set_installation_quota_override,
+        admin_console.admin_operations,
+        "set_quota_override",
+        fake_set_quota_override,
     )
 
     await admin_console.handle_command(
@@ -352,12 +308,10 @@ async def test_uninstall_purges_message_cache_when_no_subscription_remains(monke
     purged_guild_ids: list[int] = []
     cleared_quota: list[tuple[int, str]] = []
 
-    async def fake_delete_installation(guild_id: int, plugin_id: str) -> bool:
+    async def fake_uninstall_plugin(guild_id: int, plugin_id: str) -> bool:
+        fake_clear_usage(guild_id, plugin_id)
+        fake_purge_guild(guild_id)
         return True
-
-    async def fake_guild_has_event_subscription(guild_id: int, event_types: set[str]) -> bool:
-        assert event_types == admin_console.MESSAGE_CACHE_EVENTS
-        return False
 
     def fake_purge_guild(guild_id: int) -> None:
         purged_guild_ids.append(guild_id)
@@ -365,10 +319,7 @@ async def test_uninstall_purges_message_cache_when_no_subscription_remains(monke
     def fake_clear_usage(guild_id: int, plugin_id: str) -> None:
         cleared_quota.append((guild_id, plugin_id))
 
-    monkeypatch.setattr(admin_console.repository, "delete_installation", fake_delete_installation)
-    monkeypatch.setattr(admin_console.repository, "guild_has_event_subscription", fake_guild_has_event_subscription)
-    monkeypatch.setattr(admin_console.message_cache, "purge_guild", fake_purge_guild)
-    monkeypatch.setattr(admin_console.quota, "clear_usage", fake_clear_usage)
+    monkeypatch.setattr(admin_console.admin_operations, "uninstall_plugin", fake_uninstall_plugin)
 
     await admin_console.handle_command("admin plugin uninstall 1111 temp_role_punishment")
 

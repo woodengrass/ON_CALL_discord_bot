@@ -24,10 +24,12 @@ async def init_db() -> None:
             author_id INTEGER NOT NULL,
             name TEXT NOT NULL,
             latest_version TEXT NOT NULL,
-            status TEXT NOT NULL DEFAULT 'pending_review'
+            status TEXT NOT NULL DEFAULT 'pending_review',
+            pricing_tier TEXT NOT NULL DEFAULT 'free'
         )
         """
     )
+    await _add_column_if_missing("plugins", "pricing_tier", "TEXT")
 
     await _connection.execute(
         """
@@ -53,8 +55,88 @@ async def init_db() -> None:
             enabled INTEGER NOT NULL DEFAULT 1,
             execution_quota_override INTEGER,
             action_quota_override INTEGER,
+            resource_overrides_json TEXT,
             installed_at TEXT NOT NULL,
             PRIMARY KEY (guild_id, plugin_id)
+        )
+        """
+    )
+    await _add_column_if_missing("plugin_installations", "resource_overrides_json", "TEXT")
+
+    await _connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS resource_tiers (
+            tier_name TEXT PRIMARY KEY,
+            display_order INTEGER NOT NULL,
+            description TEXT NOT NULL
+        )
+        """
+    )
+    await _connection.execute(
+        """
+        INSERT OR IGNORE INTO resource_tiers (tier_name, display_order, description)
+        VALUES ('default', 0, '平台預設方案')
+        """
+    )
+
+    await _connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plugin_tier_config (
+            plugin_id TEXT NOT NULL,
+            tier_name TEXT NOT NULL,
+            allowed INTEGER NOT NULL,
+            execution_quota INTEGER,
+            action_quota INTEGER,
+            storage_key_length_limit INTEGER,
+            storage_value_bytes_limit INTEGER,
+            storage_keys_per_installation_limit INTEGER,
+            instruction_limit INTEGER,
+            memory_limit_bytes INTEGER,
+            PRIMARY KEY (plugin_id, tier_name)
+        )
+        """
+    )
+
+    await _connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS guild_resource_tiers (
+            guild_id INTEGER PRIMARY KEY,
+            tier_name TEXT NOT NULL,
+            assigned_at TEXT NOT NULL
+        )
+        """
+    )
+
+    await _connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS plugin_installation_blocks (
+            guild_id INTEGER NOT NULL,
+            plugin_id TEXT NOT NULL,
+            blocked_at TEXT NOT NULL,
+            reason TEXT,
+            PRIMARY KEY (guild_id, plugin_id)
+        )
+        """
+    )
+
+    await _connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS rejection_reason_presets (
+            preset_id TEXT PRIMARY KEY,
+            label TEXT NOT NULL
+        )
+        """
+    )
+
+    await _connection.execute(
+        """
+        CREATE TABLE IF NOT EXISTS guild_notifications (
+            notification_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            guild_id INTEGER NOT NULL,
+            notification_type TEXT NOT NULL,
+            payload_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            sent_at TEXT
         )
         """
     )
@@ -126,6 +208,8 @@ async def init_db() -> None:
         """
     )
     await _add_column_if_missing("plugin_review_log", "version", "TEXT")
+    await _add_column_if_missing("plugin_review_log", "reason_presets_json", "TEXT")
+    await _add_column_if_missing("plugin_review_log", "flagged_capabilities_json", "TEXT")
     await _connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_plugin_review_log_plugin ON plugin_review_log (plugin_id)"
     )

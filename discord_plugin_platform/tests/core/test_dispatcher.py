@@ -347,3 +347,67 @@ async def test_dispatch_event_filters_target_plugin(monkeypatch) -> None:
 
     assert dispatch_succeeded is True
     assert executed_plugin_ids == ["second_plugin"]
+
+
+async def test_dispatch_event_passes_resolved_resource_limits(monkeypatch) -> None:
+    """
+    dispatcher 應只呼叫 repository.resolve_resource_limits() 一次，並把結果傳給 worker。
+    """
+    captured_execution: dict = {}
+
+    async def fake_get_enabled_installations_for_guild(guild_id: int) -> list[dict]:
+        return [
+            {
+                "guild_id": guild_id,
+                "plugin_id": "message_logger",
+                "installed_version": "1.0.0",
+                "granted_capabilities_json": json.dumps([]),
+                "execution_quota_override": None,
+                "action_quota_override": None,
+                "resource_overrides_json": None,
+                "manifest_json": json.dumps({"event_hooks": ["on_message"]}),
+            }
+        ]
+
+    async def fake_get_plugin_source(plugin_id: str, version: str) -> str | None:
+        return "function on_message(payload) end"
+
+    async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
+        return {"instruction_limit": 1000, "memory_limit_bytes": 1024}
+
+    async def fake_execute_plugin_event(**kwargs: object) -> list[dict]:
+        captured_execution.update(kwargs)
+        return []
+
+    async def fake_execute_actions(guild_id: int, actions: list[dict]) -> list[dict]:
+        return []
+
+    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+        return True
+
+    async def fake_log_execution(
+        guild_id: int,
+        plugin_id: str,
+        event_type: str,
+        actions_json: str,
+        execution_ms: int,
+        outcome: str,
+        error: str | None = None,
+    ) -> None:
+        return None
+
+    monkeypatch.setattr(
+        dispatcher.repository,
+        "get_enabled_installations_for_guild",
+        fake_get_enabled_installations_for_guild,
+    )
+    monkeypatch.setattr(dispatcher.repository, "get_plugin_source", fake_get_plugin_source)
+    monkeypatch.setattr(dispatcher.repository, "resolve_resource_limits", fake_resolve_resource_limits)
+    monkeypatch.setattr(dispatcher.repository, "log_execution", fake_log_execution)
+    monkeypatch.setattr(dispatcher.quota, "check_and_consume_execution_quota", fake_check_and_consume_execution_quota)
+    monkeypatch.setattr(dispatcher.suspension, "is_suspended", lambda plugin_id: False)
+    monkeypatch.setattr(dispatcher, "execute_plugin_event", fake_execute_plugin_event)
+    monkeypatch.setattr(dispatcher, "_execute_actions", fake_execute_actions)
+
+    assert await dispatcher.dispatch_event(1111, "on_message", {"content": "hello"}) is True
+    assert captured_execution["resource_overrides"] == {"instruction_limit": 1000, "memory_limit_bytes": 1024}

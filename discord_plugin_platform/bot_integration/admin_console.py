@@ -9,9 +9,10 @@ import logging
 import re
 import shlex
 
-from core import message_cache, quota, repository, suspension
+from core import admin_operations, plugin_storage_repository, repository, suspension
 from core.database import get_db
-from core.manifest import ManifestValidationError, parse_manifest
+from core.manifest import ManifestValidationError
+from sandbox import engine
 
 logger = logging.getLogger(__name__)
 
@@ -182,27 +183,31 @@ async def _handle_install_command(guild_id_text: str, plugin_id: str) -> None:
     """
     guild_id = _parse_guild_id(guild_id_text)
     plugin_id = _validate_plugin_id(plugin_id)
-    plugin = await repository.get_plugin(plugin_id)
-    if plugin is None:
-        print(f"找不到外掛：{plugin_id}")
-        return
-    if plugin["status"] != "approved":
-        print(f"外掛尚未核准，不能安裝：{plugin_id}")
-        return
-
-    manifest_json = await repository.get_plugin_manifest(plugin_id, plugin["latest_version"])
-    if manifest_json is None:
-        print(f"找不到外掛 manifest：{plugin_id}@{plugin['latest_version']}")
-        return
-
-    manifest = parse_manifest(manifest_json)
-    await repository.create_installation(
-        guild_id=guild_id,
-        plugin_id=plugin_id,
-        version=plugin["latest_version"],
-        granted_capabilities=manifest.required_capabilities,
-    )
+    await admin_operations.install_plugin(guild_id, plugin_id)
     print(f"已安裝外掛 {plugin_id} 到伺服器 {guild_id}。")
+
+
+async def _build_default_tier_configs() -> dict[str, dict]:
+    """
+    為舊版終端機 approve 指令產生所有方案的預設允許設定。
+
+    Returns:
+        approve_plugin_version() 可接受的 tier_configs
+    """
+    tiers = await repository.list_resource_tiers()
+    return {
+        tier["tier_name"]: {
+            "allowed": True,
+            "execution_quota": None,
+            "action_quota": None,
+            "storage_key_length_limit": plugin_storage_repository.MAX_STORAGE_KEY_LENGTH,
+            "storage_value_bytes_limit": plugin_storage_repository.MAX_STORAGE_VALUE_BYTES,
+            "storage_keys_per_installation_limit": plugin_storage_repository.MAX_STORAGE_KEYS_PER_INSTALLATION,
+            "instruction_limit": engine.INSTRUCTION_LIMIT,
+            "memory_limit_bytes": engine.MEMORY_LIMIT_BYTES,
+        }
+        for tier in tiers
+    }
 
 
 async def _handle_review_command(parts: list[str]) -> None:
@@ -229,12 +234,12 @@ async def _handle_review_command(parts: list[str]) -> None:
     action = parts[3]
     plugin_id = _validate_plugin_id(parts[4])
     if action == "approve" and len(parts) == 5:
-        updated = await repository.approve_plugin(plugin_id)
+        updated = await admin_operations.approve_plugin_version(plugin_id, await _build_default_tier_configs())
         print("已核准外掛。" if updated else f"找不到外掛：{plugin_id}")
         return
     if action == "reject" and len(parts) >= 6:
         reason = " ".join(parts[5:])
-        updated = await repository.reject_plugin(plugin_id, reason)
+        updated = await admin_operations.reject_plugin_version(plugin_id, [], reason, [])
         print("已退回外掛。" if updated else f"找不到外掛：{plugin_id}")
         return
     print(HELP_TEXT)
@@ -253,7 +258,7 @@ async def _handle_quota_command(parts: list[str]) -> None:
     guild_id = _parse_guild_id(parts[4])
     plugin_id = _validate_plugin_id(parts[5])
     execution_quota, action_quota = _parse_quota_arguments(parts[6:])
-    updated = await repository.set_installation_quota_override(
+    updated = await admin_operations.set_quota_override(
         guild_id=guild_id,
         plugin_id=plugin_id,
         execution_quota=execution_quota,
@@ -347,15 +352,11 @@ async def handle_command(line: str) -> None:
         elif command == "uninstall" and len(parts) == 5:
             guild_id = _parse_guild_id(parts[3])
             plugin_id = _validate_plugin_id(parts[4])
-            deleted = await repository.delete_installation(guild_id, plugin_id)
-            if deleted:
-                quota.clear_usage(guild_id, plugin_id)
-            if deleted and not await repository.guild_has_event_subscription(guild_id, MESSAGE_CACHE_EVENTS):
-                message_cache.purge_guild(guild_id)
+            deleted = await admin_operations.uninstall_plugin(guild_id, plugin_id)
             print("已移除外掛安裝。" if deleted else f"找不到安裝紀錄：{guild_id}/{plugin_id}")
         elif command == "suspend" and len(parts) == 4:
             plugin_id = _validate_plugin_id(parts[3])
-            updated = await repository.suspend_plugin(plugin_id)
+            updated = await admin_operations.request_suspend(plugin_id)
             if updated:
                 await suspension.refresh_from_database(get_db())
                 print("已停權外掛並同步停權快取。")
@@ -363,7 +364,7 @@ async def handle_command(line: str) -> None:
                 print(f"找不到外掛：{plugin_id}")
         elif command == "unsuspend" and len(parts) == 4:
             plugin_id = _validate_plugin_id(parts[3])
-            updated = await repository.unsuspend_plugin(plugin_id)
+            updated = await admin_operations.request_unsuspend(plugin_id)
             if updated:
                 await suspension.refresh_from_database(get_db())
                 print("已解除外掛停權並同步停權快取。")
@@ -375,7 +376,7 @@ async def handle_command(line: str) -> None:
             await _handle_stats_command(parts)
         else:
             print(HELP_TEXT)
-    except (ManifestValidationError, ValueError) as error:
+    except (admin_operations.AdminOperationError, ManifestValidationError, ValueError) as error:
         print(f"指令執行失敗：{error}")
     except Exception as error:
         logger.error(f"外掛平台管理指令執行失敗：{error}", exc_info=True)

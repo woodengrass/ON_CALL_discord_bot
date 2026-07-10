@@ -250,7 +250,26 @@ class PluginPlatformListeners(commands.Cog):
         """
         await self.bot.wait_until_ready()
         message_cache.prune_expired()
+        await self.consume_pending_guild_notifications()
         await self.consume_due_scheduled_tasks()
+
+    async def consume_pending_guild_notifications(self) -> None:
+        """
+        消費停權/封鎖連鎖效應產生的伺服器通知，由 bot 行程實際送出 Discord 訊息。
+        """
+        notifications = await repository.get_pending_guild_notifications()
+        for notification in notifications:
+            try:
+                guild = self.bot.get_guild(notification["guild_id"])
+                if guild is None or guild.system_channel is None:
+                    logger.warning(f"找不到可送通知的系統頻道：guild_id={notification['guild_id']}")
+                    await repository.mark_guild_notification_sent(notification["notification_id"])
+                    continue
+                payload = json.loads(notification["payload_json"])
+                await guild.system_channel.send(_format_guild_notification(notification["notification_type"], payload))
+                await repository.mark_guild_notification_sent(notification["notification_id"])
+            except Exception as error:
+                logger.error(f"送出伺服器通知失敗：{error}", exc_info=True)
 
     async def consume_due_scheduled_tasks(self) -> None:
         """
@@ -314,6 +333,26 @@ def _get_interaction_component_type(interaction_data: dict) -> str:
     if component_type in {3, 5, 6, 7, 8}:
         return "select_menu"
     return "unknown"
+
+
+def _format_guild_notification(notification_type: str, payload: dict) -> str:
+    """
+    將通知資料格式化成要送到伺服器 system_channel 的文字。
+
+    Args:
+        notification_type: 通知類型
+        payload: 通知 payload
+
+    Returns:
+        Discord 訊息文字
+    """
+    plugin_id = payload.get("plugin_id", "unknown")
+    if notification_type == "plugin_banned":
+        reason = payload.get("reason") or "未提供原因"
+        return f"外掛 {plugin_id} 已被平台永久封鎖並自動解除安裝。原因：{reason}"
+    if notification_type == "plugin_suspended":
+        return f"外掛 {plugin_id} 已被平台停權並自動解除安裝。"
+    return f"外掛平台通知：{notification_type}"
 
 
 def _normalize_discord_timestamp(value: object) -> str | None:
