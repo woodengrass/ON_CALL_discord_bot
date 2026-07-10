@@ -34,16 +34,28 @@ function apiDelete(path) {
   return apiRequest("DELETE", path);
 }
 
-function showError(container, error) {
+function showBanner(container, message, kind) {
   const element = typeof container === "string" ? document.getElementById(container) : container;
   if (!element) {
     return;
   }
-  element.textContent = "操作失敗：" + error.message;
+  element.textContent = message;
+  element.className = "banner " + (kind || "error");
   element.classList.remove("hidden");
+  if (kind === "success") {
+    setTimeout(() => element.classList.add("hidden"), 2500);
+  }
 }
 
-function clearError(container) {
+function showError(container, error) {
+  showBanner(container, "操作失敗：" + error.message, "error");
+}
+
+function showSuccess(container, message) {
+  showBanner(container, message, "success");
+}
+
+function clearBanner(container) {
   const element = typeof container === "string" ? document.getElementById(container) : container;
   if (!element) {
     return;
@@ -67,4 +79,22 @@ function el(tag, attributes, children) {
     node.appendChild(child);
   }
   return node;
+}
+
+function statusBadge(status) {
+  return el("span", { class: "badge status-" + status, text: status });
+}
+
+function getSelectedParam(name) {
+  return new URLSearchParams(window.location.search).get(name);
+}
+
+function setSelectedParam(name, value) {
+  const url = new URL(window.location.href);
+  if (value === null || value === undefined || value === "") {
+    url.searchParams.delete(name);
+  } else {
+    url.searchParams.set(name, value);
+  }
+  window.history.pushState({}, "", url);
 }

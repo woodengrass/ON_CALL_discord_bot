@@ -603,3 +603,20 @@ async def test_list_plugin_installation_blocks_scoped_to_guild(plugin_database: 
     assert blocks[0]["reason"] == "reason a"
     assert blocks[1]["reason"] is None
     assert await repository.list_plugin_installation_blocks(3333) == []
+
+
+async def test_list_known_guild_ids_unions_all_sources(plugin_database: aiosqlite.Connection) -> None:
+    await repository.set_guild_resource_tier(1111, "default")
+    await repository.block_plugin_installation(2222, "plugin_a")
+    await repository.submit_plugin_version(
+        plugin_id="plugin_a",
+        author_id=1,
+        name="plugin_a",
+        version="1.0.0",
+        manifest_json='{"name": "plugin_a"}',
+        source_code="function on_message(payload) end",
+        capability_api_version=1,
+    )
+    await repository.create_installation(3333, "plugin_a", "1.0.0", [])
+
+    assert await repository.list_known_guild_ids() == [1111, 2222, 3333]

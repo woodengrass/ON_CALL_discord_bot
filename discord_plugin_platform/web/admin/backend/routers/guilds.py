@@ -11,6 +11,14 @@ from web.admin.backend.schemas import GuildResourceTierRequest, InstallationBloc
 router = APIRouter(prefix="/api/guilds", tags=["guilds"])
 
 
+@router.get("")
+async def list_guilds(operator: str = Depends(get_current_operator)) -> list[int]:
+    """
+    列出目前平台知道的所有伺服器 ID，供伺服器管理頁做快速選單。
+    """
+    return await repository.list_known_guild_ids()
+
+
 @router.get("/{guild_id}/resource-tier")
 async def get_guild_resource_tier(guild_id: int, operator: str = Depends(get_current_operator)) -> dict:
     """

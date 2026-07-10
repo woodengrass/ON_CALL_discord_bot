@@ -33,3 +33,13 @@ async def test_block_list_and_unblock_plugin(client: TestClient) -> None:
 async def test_unblock_unknown_block_returns_404(client: TestClient) -> None:
     response = client.delete("/api/guilds/1111/blocks/temp_role_punishment")
     assert response.status_code == 404
+
+
+async def test_list_guilds_returns_known_guild_ids(client: TestClient) -> None:
+    client.put("/api/guilds/2222/resource-tier", json={"tier_name": "default"})
+    client.put("/api/guilds/1111/blocks/temp_role_punishment", json={"reason": "abuse"})
+
+    response = client.get("/api/guilds")
+
+    assert response.status_code == 200
+    assert response.json() == [1111, 2222]

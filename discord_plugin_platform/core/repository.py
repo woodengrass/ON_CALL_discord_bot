@@ -1062,6 +1062,29 @@ async def get_guild_resource_tier(guild_id: int) -> str:
     return row[0] if row is not None else DEFAULT_RESOURCE_TIER
 
 
+async def list_known_guild_ids() -> list[int]:
+    """
+    列出目前平台知道的所有伺服器 ID（有安裝紀錄、有指定方案，或有封鎖紀錄的伺服器），
+    供 web/admin/ 伺服器管理頁做快速選單使用，見 design.md H.3「伺服器管理」。
+
+    Returns:
+        依 guild_id 排序的伺服器 ID 清單
+    """
+    db = get_db()
+    async with db.execute(
+        """
+        SELECT guild_id FROM plugin_installations
+        UNION
+        SELECT guild_id FROM guild_resource_tiers
+        UNION
+        SELECT guild_id FROM plugin_installation_blocks
+        ORDER BY guild_id
+        """
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return [row[0] for row in rows]
+
+
 async def set_plugin_tier_config(plugin_id: str, tier_name: str, config: dict) -> None:
     """
     設定外掛在單一資源方案下的允許狀態、配額與資源限制。

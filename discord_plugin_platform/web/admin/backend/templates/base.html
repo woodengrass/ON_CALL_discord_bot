@@ -6,12 +6,15 @@
   <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <nav>
-    <a href="/">首頁</a>
-    <a href="/plugins">外掛審核</a>
-    <a href="/tiers">資源方案</a>
-  </nav>
-  <hr>
+  <header class="topbar">
+    <h1>外掛平台後台</h1>
+    <nav class="main-nav">
+      <a href="/plugins" class="{{ 'active' if active_nav == 'plugins' else '' }}">外掛</a>
+      <a href="/guilds" class="{{ 'active' if active_nav == 'guilds' else '' }}">伺服器</a>
+      <a href="/status" class="{{ 'active' if active_nav == 'status' else '' }}">狀態</a>
+      <a href="/docs">API 文件</a>
+    </nav>
+  </header>
   {% block content %}{% endblock %}
   <script src="/static/app.js"></script>
   {% block scripts %}{% endblock %}
