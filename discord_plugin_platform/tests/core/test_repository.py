@@ -590,3 +590,16 @@ async def test_get_execution_stats_filters_by_since(plugin_database: aiosqlite.C
 
     assert stats["total"] == 1
     assert stats["avg_execution_ms"] == pytest.approx(50.0)
+
+
+async def test_list_plugin_installation_blocks_scoped_to_guild(plugin_database: aiosqlite.Connection) -> None:
+    await repository.block_plugin_installation(1111, "plugin_a", "reason a")
+    await repository.block_plugin_installation(1111, "plugin_b")
+    await repository.block_plugin_installation(2222, "plugin_a", "other guild")
+
+    blocks = await repository.list_plugin_installation_blocks(1111)
+
+    assert [block["plugin_id"] for block in blocks] == ["plugin_a", "plugin_b"]
+    assert blocks[0]["reason"] == "reason a"
+    assert blocks[1]["reason"] is None
+    assert await repository.list_plugin_installation_blocks(3333) == []

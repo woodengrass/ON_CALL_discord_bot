@@ -1210,6 +1210,25 @@ async def get_plugin_installation_block(guild_id: int, plugin_id: str) -> dict |
     return {"guild_id": guild_id, "plugin_id": plugin_id, "blocked_at": row[0], "reason": row[1]}
 
 
+async def list_plugin_installation_blocks(guild_id: int) -> list[dict]:
+    """
+    列出指定伺服器封鎖的所有外掛，見 design.md H.3「伺服器管理」。
+
+    Args:
+        guild_id: 伺服器 ID
+
+    Returns:
+        封鎖紀錄清單，依 plugin_id 排序
+    """
+    db = get_db()
+    async with db.execute(
+        "SELECT plugin_id, blocked_at, reason FROM plugin_installation_blocks WHERE guild_id = ? ORDER BY plugin_id",
+        (guild_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    return [{"guild_id": guild_id, "plugin_id": row[0], "blocked_at": row[1], "reason": row[2]} for row in rows]
+
+
 async def create_rejection_reason_preset(preset_id: str, label: str) -> None:
     """
     建立或更新退回原因預設選項。
