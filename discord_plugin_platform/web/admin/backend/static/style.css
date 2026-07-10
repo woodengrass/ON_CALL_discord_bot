@@ -1,0 +1,55 @@
+/*
+最小限度樣式，操作型態是表單導向的列表/詳情/按鈕互動，不追求視覺設計，見 design.md H.1。
+*/
+
+body {
+  font-family: system-ui, sans-serif;
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 1.5rem;
+  color: #1a1a1a;
+}
+
+nav a {
+  margin-right: 1rem;
+}
+
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 1.5rem;
+}
+
+th, td {
+  border: 1px solid #ccc;
+  padding: 0.4rem 0.6rem;
+  text-align: left;
+}
+
+fieldset {
+  margin-bottom: 1rem;
+}
+
+.hidden {
+  display: none;
+}
+
+.error {
+  color: #b00020;
+  margin: 0.5rem 0;
+}
+
+.tier-config-block {
+  border: 1px solid #ccc;
+  padding: 0.6rem;
+  margin-bottom: 0.6rem;
+}
+
+label {
+  display: block;
+  margin: 0.3rem 0;
+}
+
+button {
+  margin: 0.2rem 0.3rem 0.2rem 0;
+}

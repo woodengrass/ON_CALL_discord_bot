@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block title %}外掛列表{% endblock %}
+{% block content %}
+<h1>外掛列表</h1>
+<label>
+  依狀態篩選
+  <select id="status-filter">
+    <option value="">全部</option>
+    <option value="pending_review">待審核</option>
+    <option value="approved">已核准</option>
+    <option value="rejected">已退回</option>
+    <option value="suspended">已停權</option>
+    <option value="banned">已封鎖</option>
+  </select>
+</label>
+<div id="error-box" class="error hidden"></div>
+<table>
+  <thead>
+    <tr>
+      <th>plugin_id</th>
+      <th>名稱</th>
+      <th>版本</th>
+      <th>狀態</th>
+      <th>計價分類</th>
+    </tr>
+  </thead>
+  <tbody id="plugins-table-body"></tbody>
+</table>
+{% endblock %}
+{% block scripts %}
+<script>
+async function loadPlugins() {
+  clearError("error-box");
+  const status = document.getElementById("status-filter").value;
+  const query = status ? "?status=" + encodeURIComponent(status) : "";
+  try {
+    const plugins = await apiGet("/api/plugins" + query);
+    const body = document.getElementById("plugins-table-body");
+    body.innerHTML = "";
+    for (const plugin of plugins) {
+      const link = el("a", { href: "/plugins/" + encodeURIComponent(plugin.plugin_id), text: plugin.plugin_id });
+      body.appendChild(el("tr", {}, [
+        el("td", {}, [link]),
+        el("td", { text: plugin.name }),
+        el("td", { text: plugin.latest_version }),
+        el("td", { text: plugin.status }),
+        el("td", { text: plugin.pricing_tier }),
+      ]));
+    }
+  } catch (error) {
+    showError("error-box", error);
+  }
+}
+
+document.getElementById("status-filter").addEventListener("change", loadPlugins);
+loadPlugins();
+</script>
+{% endblock %}

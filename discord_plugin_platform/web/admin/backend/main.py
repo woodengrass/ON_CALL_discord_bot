@@ -4,14 +4,36 @@
 uvicorn web.admin.backend.main:app --host 127.0.0.1 --port 8001
 """
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
+from pathlib import Path
+
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 
+from core import database
 from core.admin_operations import AdminOperationError
 from core.manifest import ManifestValidationError
-from web.admin.backend.routers import guilds, installations, plugins, stats, suspension, tiers
+from web.admin.backend.routers import guilds, installations, pages, plugins, stats, suspension, tiers
 
-app = FastAPI(title="Discord Plugin Platform Admin")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
+    """
+    獨立行程的資料庫連線生命週期，見 design.md H.1/H.2：跟 bot 主行程各自獨立，
+    但透過 core/repository.py 讀寫同一份 SQLite 資料庫。
+    """
+    await database.init_db()
+    yield
+    await database.close_db()
+
+
+app = FastAPI(title="Discord Plugin Platform Admin", lifespan=lifespan)
+
+app.mount(
+    "/static", StaticFiles(directory=str(Path(__file__).resolve().parent / "static")), name="static"
+)
 
 app.include_router(plugins.router)
 app.include_router(tiers.router)
@@ -19,6 +41,7 @@ app.include_router(guilds.router)
 app.include_router(installations.router)
 app.include_router(suspension.router)
 app.include_router(stats.router)
+app.include_router(pages.router)
 
 
 @app.exception_handler(AdminOperationError)

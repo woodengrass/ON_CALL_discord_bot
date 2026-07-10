@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}外掛平台後台{% endblock %}
+{% block content %}
+<h1>外掛平台後台</h1>
+<p>平台操作者後台，v1 綁定 127.0.0.1、不做真正登入驗證。完整 API 說明見 <a href="/docs">/docs</a>。</p>
+
+<h2>前往伺服器管理</h2>
+<label>
+  伺服器 ID
+  <input type="text" id="guild-id-input" placeholder="輸入 guild_id">
+</label>
+<button id="go-guild-button">前往</button>
+{% endblock %}
+{% block scripts %}
+<script>
+document.getElementById("go-guild-button").addEventListener("click", () => {
+  const guildId = document.getElementById("guild-id-input").value.trim();
+  if (guildId) {
+    window.location.href = "/guilds/" + encodeURIComponent(guildId);
+  }
+});
+</script>
+{% endblock %}
