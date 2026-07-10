@@ -375,3 +375,282 @@ async def test_stats_rejects_unknown_argument(monkeypatch, capsys) -> None:
     await admin_console.handle_command("admin plugin stats temp_role_punishment bogus=1")
 
     assert "指令執行失敗" in capsys.readouterr().out
+
+
+async def test_ban_requires_reason(monkeypatch, capsys) -> None:
+    ban_called = False
+
+    async def fake_ban_plugin_version(plugin_id: str, reason: str) -> bool:
+        nonlocal ban_called
+        ban_called = True
+        return True
+
+    monkeypatch.setattr(admin_console.admin_operations, "ban_plugin_version", fake_ban_plugin_version)
+
+    await admin_console.handle_command("admin plugin ban temp_role_punishment")
+
+    assert ban_called is False
+    assert "必須提供封鎖原因" in capsys.readouterr().out
+
+
+async def test_ban_bans_plugin_with_reason(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_ban_plugin_version(plugin_id: str, reason: str) -> bool:
+        captured["plugin_id"] = plugin_id
+        captured["reason"] = reason
+        return True
+
+    monkeypatch.setattr(admin_console.admin_operations, "ban_plugin_version", fake_ban_plugin_version)
+
+    await admin_console.handle_command('admin plugin ban temp_role_punishment "violates policy"')
+
+    assert captured == {"plugin_id": "temp_role_punishment", "reason": "violates policy"}
+    assert "已永久封鎖外掛" in capsys.readouterr().out
+
+
+async def test_unban_reports_not_found(monkeypatch, capsys) -> None:
+    async def fake_unban_plugin(plugin_id: str) -> bool:
+        return False
+
+    monkeypatch.setattr(admin_console.admin_operations, "unban_plugin", fake_unban_plugin)
+
+    await admin_console.handle_command("admin plugin unban temp_role_punishment")
+
+    assert "找不到外掛" in capsys.readouterr().out
+
+
+async def test_pricing_sets_valid_tier(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_set_plugin_pricing_tier(plugin_id: str, pricing_tier: str) -> bool:
+        captured["plugin_id"] = plugin_id
+        captured["pricing_tier"] = pricing_tier
+        return True
+
+    monkeypatch.setattr(admin_console.admin_operations, "set_plugin_pricing_tier", fake_set_plugin_pricing_tier)
+
+    await admin_console.handle_command("admin plugin pricing temp_role_punishment paid")
+
+    assert captured == {"plugin_id": "temp_role_punishment", "pricing_tier": "paid"}
+    assert "已設定計價分類為 paid" in capsys.readouterr().out
+
+
+async def test_pricing_rejects_invalid_tier(monkeypatch, capsys) -> None:
+    set_called = False
+
+    async def fake_set_plugin_pricing_tier(plugin_id: str, pricing_tier: str) -> bool:
+        nonlocal set_called
+        set_called = True
+        return True
+
+    monkeypatch.setattr(admin_console.admin_operations, "set_plugin_pricing_tier", fake_set_plugin_pricing_tier)
+
+    await admin_console.handle_command("admin plugin pricing temp_role_punishment gold")
+
+    assert set_called is False
+    assert "只能是 free 或 paid" in capsys.readouterr().out
+
+
+async def test_resource_sets_overrides(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_set_installation_resource_overrides(guild_id: int, plugin_id: str, overrides: dict) -> bool:
+        captured.update({"guild_id": guild_id, "plugin_id": plugin_id, "overrides": overrides})
+        return True
+
+    monkeypatch.setattr(
+        admin_console.admin_operations, "set_installation_resource_overrides", fake_set_installation_resource_overrides
+    )
+
+    await admin_console.handle_command(
+        "admin plugin resource 1111 temp_role_punishment instruction_limit=2000000 memory_limit_bytes=67108864"
+    )
+
+    assert captured == {
+        "guild_id": 1111,
+        "plugin_id": "temp_role_punishment",
+        "overrides": {"instruction_limit": 2000000, "memory_limit_bytes": 67108864},
+    }
+    assert "已更新資源覆蓋" in capsys.readouterr().out
+
+
+async def test_resource_with_no_arguments_clears_overrides(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_set_installation_resource_overrides(guild_id: int, plugin_id: str, overrides: dict) -> bool:
+        captured["overrides"] = overrides
+        return True
+
+    monkeypatch.setattr(
+        admin_console.admin_operations, "set_installation_resource_overrides", fake_set_installation_resource_overrides
+    )
+
+    await admin_console.handle_command("admin plugin resource 1111 temp_role_punishment")
+
+    assert captured["overrides"] == {}
+    assert "已清除資源覆蓋" in capsys.readouterr().out
+
+
+async def test_resource_rejects_unknown_field(monkeypatch, capsys) -> None:
+    await admin_console.handle_command("admin plugin resource 1111 temp_role_punishment bogus_field=1")
+
+    assert "未知的資源覆蓋欄位" in capsys.readouterr().out
+
+
+async def test_tier_list_prints_tiers(monkeypatch, capsys) -> None:
+    async def fake_list_resource_tiers() -> list[dict]:
+        return [{"tier_name": "default", "display_order": 0, "description": "平台預設方案"}]
+
+    monkeypatch.setattr(admin_console.repository, "list_resource_tiers", fake_list_resource_tiers)
+
+    await admin_console.handle_command("admin plugin tier list")
+
+    output = capsys.readouterr().out
+    assert "default" in output and "order=0" in output
+
+
+async def test_tier_create(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_create_resource_tier(tier_name: str, display_order: int, description: str) -> None:
+        captured.update({"tier_name": tier_name, "display_order": display_order, "description": description})
+
+    monkeypatch.setattr(admin_console.admin_operations, "create_resource_tier", fake_create_resource_tier)
+
+    await admin_console.handle_command('admin plugin tier create large 10 "large guild"')
+
+    assert captured == {"tier_name": "large", "display_order": 10, "description": "large guild"}
+    assert "已建立資源方案 large" in capsys.readouterr().out
+
+
+async def test_tier_delete_with_force(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_delete_resource_tier(tier_name: str, force: bool = False) -> bool:
+        captured.update({"tier_name": tier_name, "force": force})
+        return True
+
+    monkeypatch.setattr(admin_console.admin_operations, "delete_resource_tier", fake_delete_resource_tier)
+
+    await admin_console.handle_command("admin plugin tier delete large force")
+
+    assert captured == {"tier_name": "large", "force": True}
+    assert "已刪除資源方案 large" in capsys.readouterr().out
+
+
+async def test_tier_config_show(monkeypatch, capsys) -> None:
+    async def fake_get_plugin_tier_config(plugin_id: str, tier_name: str) -> dict | None:
+        assert (plugin_id, tier_name) == ("temp_role_punishment", "default")
+        return {"allowed": True}
+
+    monkeypatch.setattr(admin_console.repository, "get_plugin_tier_config", fake_get_plugin_tier_config)
+
+    await admin_console.handle_command("admin plugin tier config show default temp_role_punishment")
+
+    assert "temp_role_punishment@default" in capsys.readouterr().out
+
+
+async def test_tier_config_set_requires_allowed(monkeypatch, capsys) -> None:
+    update_called = False
+
+    async def fake_update_plugin_tier_config(plugin_id: str, tier_name: str, config: dict) -> None:
+        nonlocal update_called
+        update_called = True
+
+    monkeypatch.setattr(admin_console.admin_operations, "update_plugin_tier_config", fake_update_plugin_tier_config)
+
+    await admin_console.handle_command(
+        "admin plugin tier config set default temp_role_punishment execution_quota=10"
+    )
+
+    assert update_called is False
+    assert "必須提供 allowed=true 或 allowed=false" in capsys.readouterr().out
+
+
+async def test_tier_config_set_updates_config(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_update_plugin_tier_config(plugin_id: str, tier_name: str, config: dict) -> None:
+        captured.update({"plugin_id": plugin_id, "tier_name": tier_name, "config": config})
+
+    monkeypatch.setattr(admin_console.admin_operations, "update_plugin_tier_config", fake_update_plugin_tier_config)
+
+    await admin_console.handle_command(
+        "admin plugin tier config set default temp_role_punishment allowed=true execution_quota=10"
+    )
+
+    assert captured == {
+        "plugin_id": "temp_role_punishment",
+        "tier_name": "default",
+        "config": {"execution_quota": 10, "allowed": True},
+    }
+    assert "已更新" in capsys.readouterr().out
+
+
+async def test_guild_tier_show(monkeypatch, capsys) -> None:
+    async def fake_get_guild_resource_tier(guild_id: int) -> str:
+        assert guild_id == 1111
+        return "default"
+
+    monkeypatch.setattr(admin_console.repository, "get_guild_resource_tier", fake_get_guild_resource_tier)
+
+    await admin_console.handle_command("admin guild tier show 1111")
+
+    assert "套用方案：default" in capsys.readouterr().out
+
+
+async def test_guild_tier_set(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_set_guild_resource_tier(guild_id: int, tier_name: str) -> None:
+        captured.update({"guild_id": guild_id, "tier_name": tier_name})
+
+    monkeypatch.setattr(admin_console.admin_operations, "set_guild_resource_tier", fake_set_guild_resource_tier)
+
+    await admin_console.handle_command("admin guild tier set 1111 large")
+
+    assert captured == {"guild_id": 1111, "tier_name": "large"}
+    assert "已將伺服器 1111 套用方案 large" in capsys.readouterr().out
+
+
+async def test_guild_block_list(monkeypatch, capsys) -> None:
+    async def fake_list_plugin_installation_blocks(guild_id: int) -> list[dict]:
+        assert guild_id == 1111
+        return [{"plugin_id": "temp_role_punishment", "blocked_at": "2026-01-01T00:00:00", "reason": "abuse"}]
+
+    monkeypatch.setattr(
+        admin_console.repository, "list_plugin_installation_blocks", fake_list_plugin_installation_blocks
+    )
+
+    await admin_console.handle_command("admin guild block list 1111")
+
+    output = capsys.readouterr().out
+    assert "temp_role_punishment" in output and "abuse" in output
+
+
+async def test_guild_block_add(monkeypatch, capsys) -> None:
+    captured: dict = {}
+
+    async def fake_block_plugin_installation(guild_id: int, plugin_id: str, reason: str | None = None) -> None:
+        captured.update({"guild_id": guild_id, "plugin_id": plugin_id, "reason": reason})
+
+    monkeypatch.setattr(admin_console.admin_operations, "block_plugin_installation", fake_block_plugin_installation)
+
+    await admin_console.handle_command('admin guild block add 1111 temp_role_punishment "spam behavior"')
+
+    assert captured == {"guild_id": 1111, "plugin_id": "temp_role_punishment", "reason": "spam behavior"}
+    assert "已封鎖伺服器 1111 安裝外掛 temp_role_punishment" in capsys.readouterr().out
+
+
+async def test_guild_block_remove(monkeypatch, capsys) -> None:
+    async def fake_unblock_plugin_installation(guild_id: int, plugin_id: str) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        admin_console.admin_operations, "unblock_plugin_installation", fake_unblock_plugin_installation
+    )
+
+    await admin_console.handle_command("admin guild block remove 1111 temp_role_punishment")
+
+    assert "已解除封鎖" in capsys.readouterr().out
