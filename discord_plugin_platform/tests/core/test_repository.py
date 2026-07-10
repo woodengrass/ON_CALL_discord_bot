@@ -217,6 +217,8 @@ async def test_resource_tier_config_and_resolve_resource_limits(plugin_database:
         "large",
         {
             "allowed": True,
+            "execution_quota": 20,
+            "action_quota": 30,
             "storage_key_length_limit": 300,
             "storage_value_bytes_limit": 400,
             "storage_keys_per_installation_limit": 500,
@@ -226,9 +228,12 @@ async def test_resource_tier_config_and_resolve_resource_limits(plugin_database:
     )
     await repository.create_installation(1111, "temp_role_punishment", "1.0.0", ["storage"])
     await repository.set_resource_overrides(1111, "temp_role_punishment", {"instruction_limit": 900})
+    await repository.set_installation_quota_override(1111, "temp_role_punishment", None, 40)
 
     limits = await repository.resolve_resource_limits(1111, "temp_role_punishment")
 
+    assert limits["execution_quota"] == 20
+    assert limits["action_quota"] == 40
     assert limits["storage_key_length_limit"] == 300
     assert limits["storage_value_bytes_limit"] == 400
     assert limits["storage_keys_per_installation_limit"] == 500

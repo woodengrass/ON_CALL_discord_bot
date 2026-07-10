@@ -183,10 +183,17 @@ async def test_http_exception_rate_limit_does_not_roll_back_storage_write(temp_d
     async def fake_get_plugin_source(plugin_id: str, version: str) -> str | None:
         return "function on_message(payload) end"
 
-    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+    async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
+        return {"execution_quota": 60, "action_quota": 30}
+
+    async def fake_check_and_consume_execution_quota(
+        guild_id: int, plugin_id: str, limit_override: int | None = None
+    ) -> bool:
         return True
 
-    async def fake_check_and_consume_action_quota(guild_id: int, plugin_id: str, action_count: int) -> bool:
+    async def fake_check_and_consume_action_quota(
+        guild_id: int, plugin_id: str, action_count: int, limit_override: int | None = None
+    ) -> bool:
         return True
 
     async def fake_execute_plugin_event(**kwargs) -> list[dict]:
@@ -197,6 +204,7 @@ async def test_http_exception_rate_limit_does_not_roll_back_storage_write(temp_d
         dispatcher.repository, "get_enabled_installations_for_guild", fake_get_enabled_installations_for_guild
     )
     monkeypatch.setattr(dispatcher.repository, "get_plugin_source", fake_get_plugin_source)
+    monkeypatch.setattr(dispatcher.repository, "resolve_resource_limits", fake_resolve_resource_limits)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_execution_quota", fake_check_and_consume_execution_quota)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_action_quota", fake_check_and_consume_action_quota)
     monkeypatch.setattr(dispatcher.suspension, "is_suspended", lambda plugin_id: False)

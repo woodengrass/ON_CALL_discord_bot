@@ -1,7 +1,24 @@
 import json
+from collections.abc import AsyncIterator
+from pathlib import Path
 
-from core import dispatcher
+import aiosqlite
+import pytest
+
+from core import database, dispatcher, quota, repository
 from core.dispatcher import _installation_handles_event, _validate_actions
+
+
+@pytest.fixture()
+async def plugin_database(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> AsyncIterator[aiosqlite.Connection]:
+    """
+    建立每個 dispatcher 整合測試專用的暫存外掛平台資料庫。
+    """
+    await database.close_db()
+    monkeypatch.setattr(database, "DB_PATH", str(tmp_path / "dispatcher_plugin_platform.db"))
+    await database.init_db()
+    yield database.get_db()
+    await database.close_db()
 
 
 def test_installation_handles_only_manifest_events() -> None:
@@ -96,10 +113,19 @@ async def test_dispatch_event_passes_source_code_and_granted_capabilities(monkey
         captured_execution.update(kwargs)
         return []
 
-    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+    async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
+        return {"execution_quota": 60, "action_quota": 30}
+
+    async def fake_check_and_consume_execution_quota(
+        guild_id: int, plugin_id: str, limit_override: int | None = None
+    ) -> bool:
+        assert limit_override == 60
         return True
 
-    async def fake_check_and_consume_action_quota(guild_id: int, plugin_id: str, action_count: int) -> bool:
+    async def fake_check_and_consume_action_quota(
+        guild_id: int, plugin_id: str, action_count: int, limit_override: int | None = None
+    ) -> bool:
+        assert limit_override == 30
         return True
 
     async def fake_execute_actions(guild_id: int, actions: list[dict]) -> None:
@@ -122,6 +148,7 @@ async def test_dispatch_event_passes_source_code_and_granted_capabilities(monkey
         fake_get_enabled_installations_for_guild,
     )
     monkeypatch.setattr(dispatcher.repository, "get_plugin_source", fake_get_plugin_source)
+    monkeypatch.setattr(dispatcher.repository, "resolve_resource_limits", fake_resolve_resource_limits)
     monkeypatch.setattr(dispatcher.repository, "log_execution", fake_log_execution)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_execution_quota", fake_check_and_consume_execution_quota)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_action_quota", fake_check_and_consume_action_quota)
@@ -174,10 +201,17 @@ async def test_dispatch_event_recovers_when_execute_actions_raises(monkeypatch) 
     async def fake_execute_plugin_event(**kwargs: object) -> list[dict]:
         return [{"type": "send_message", "params": {"channel_id": 1, "content": "hi"}}]
 
-    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+    async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
+        return {"execution_quota": 60, "action_quota": 30}
+
+    async def fake_check_and_consume_execution_quota(
+        guild_id: int, plugin_id: str, limit_override: int | None = None
+    ) -> bool:
         return True
 
-    async def fake_check_and_consume_action_quota(guild_id: int, plugin_id: str, action_count: int) -> bool:
+    async def fake_check_and_consume_action_quota(
+        guild_id: int, plugin_id: str, action_count: int, limit_override: int | None = None
+    ) -> bool:
         return True
 
     async def fake_execute_actions(guild_id: int, actions: list[dict]) -> None:
@@ -202,6 +236,7 @@ async def test_dispatch_event_recovers_when_execute_actions_raises(monkeypatch) 
         fake_get_enabled_installations_for_guild,
     )
     monkeypatch.setattr(dispatcher.repository, "get_plugin_source", fake_get_plugin_source)
+    monkeypatch.setattr(dispatcher.repository, "resolve_resource_limits", fake_resolve_resource_limits)
     monkeypatch.setattr(dispatcher.repository, "log_execution", fake_log_execution)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_execution_quota", fake_check_and_consume_execution_quota)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_action_quota", fake_check_and_consume_action_quota)
@@ -241,7 +276,12 @@ async def test_dispatch_event_logs_crashed_when_source_code_missing(monkeypatch)
     async def fake_get_plugin_source(plugin_id: str, version: str) -> str | None:
         return None
 
-    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+    async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
+        return {"execution_quota": 60, "action_quota": 30}
+
+    async def fake_check_and_consume_execution_quota(
+        guild_id: int, plugin_id: str, limit_override: int | None = None
+    ) -> bool:
         return True
 
     async def fake_execute_plugin_event(**kwargs: object) -> list[dict]:
@@ -267,6 +307,7 @@ async def test_dispatch_event_logs_crashed_when_source_code_missing(monkeypatch)
         fake_get_enabled_installations_for_guild,
     )
     monkeypatch.setattr(dispatcher.repository, "get_plugin_source", fake_get_plugin_source)
+    monkeypatch.setattr(dispatcher.repository, "resolve_resource_limits", fake_resolve_resource_limits)
     monkeypatch.setattr(dispatcher.repository, "log_execution", fake_log_execution)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_execution_quota", fake_check_and_consume_execution_quota)
     monkeypatch.setattr(dispatcher.suspension, "is_suspended", lambda plugin_id: False)
@@ -309,7 +350,12 @@ async def test_dispatch_event_filters_target_plugin(monkeypatch) -> None:
         executed_plugin_ids.append(kwargs["plugin_id"])
         return []
 
-    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+    async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
+        return {"execution_quota": 60, "action_quota": 30}
+
+    async def fake_check_and_consume_execution_quota(
+        guild_id: int, plugin_id: str, limit_override: int | None = None
+    ) -> bool:
         return True
 
     async def fake_execute_actions(guild_id: int, actions: list[dict]) -> None:
@@ -332,6 +378,7 @@ async def test_dispatch_event_filters_target_plugin(monkeypatch) -> None:
         fake_get_enabled_installations_for_guild,
     )
     monkeypatch.setattr(dispatcher.repository, "get_plugin_source", fake_get_plugin_source)
+    monkeypatch.setattr(dispatcher.repository, "resolve_resource_limits", fake_resolve_resource_limits)
     monkeypatch.setattr(dispatcher.repository, "log_execution", fake_log_execution)
     monkeypatch.setattr(dispatcher.quota, "check_and_consume_execution_quota", fake_check_and_consume_execution_quota)
     monkeypatch.setattr(dispatcher.suspension, "is_suspended", lambda plugin_id: False)
@@ -373,7 +420,7 @@ async def test_dispatch_event_passes_resolved_resource_limits(monkeypatch) -> No
         return "function on_message(payload) end"
 
     async def fake_resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
-        return {"instruction_limit": 1000, "memory_limit_bytes": 1024}
+        return {"execution_quota": 7, "action_quota": 11, "instruction_limit": 1000, "memory_limit_bytes": 1024}
 
     async def fake_execute_plugin_event(**kwargs: object) -> list[dict]:
         captured_execution.update(kwargs)
@@ -382,7 +429,10 @@ async def test_dispatch_event_passes_resolved_resource_limits(monkeypatch) -> No
     async def fake_execute_actions(guild_id: int, actions: list[dict]) -> list[dict]:
         return []
 
-    async def fake_check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+    async def fake_check_and_consume_execution_quota(
+        guild_id: int, plugin_id: str, limit_override: int | None = None
+    ) -> bool:
+        assert limit_override == 7
         return True
 
     async def fake_log_execution(
@@ -410,4 +460,57 @@ async def test_dispatch_event_passes_resolved_resource_limits(monkeypatch) -> No
     monkeypatch.setattr(dispatcher, "_execute_actions", fake_execute_actions)
 
     assert await dispatcher.dispatch_event(1111, "on_message", {"content": "hello"}) is True
-    assert captured_execution["resource_overrides"] == {"instruction_limit": 1000, "memory_limit_bytes": 1024}
+    assert captured_execution["resource_overrides"] == {
+        "execution_quota": 7,
+        "action_quota": 11,
+        "instruction_limit": 1000,
+        "memory_limit_bytes": 1024,
+    }
+
+
+async def test_dispatch_event_uses_tier_execution_quota_without_installation_override(
+    plugin_database: aiosqlite.Connection, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """
+    方案設定 execution_quota=2 且安裝沒有個別覆蓋時，第 3 次分派應被配額擋下。
+    """
+    plugin_id = "tier_limited_plugin"
+    quota.clear_usage(1111, plugin_id)
+    await repository.submit_plugin_version(
+        plugin_id=plugin_id,
+        author_id=1234,
+        name=plugin_id,
+        version="1.0.0",
+        manifest_json=json.dumps({"event_hooks": ["on_message"]}),
+        source_code="function on_message(payload) end",
+        capability_api_version=1,
+    )
+    await repository.set_plugin_tier_config(
+        plugin_id,
+        repository.DEFAULT_RESOURCE_TIER,
+        {"allowed": True, "execution_quota": 2, "action_quota": 30},
+    )
+    await repository.create_installation(1111, plugin_id, "1.0.0", [])
+
+    async def fake_execute_plugin_event(**kwargs: object) -> list[dict]:
+        return []
+
+    async def fake_execute_actions(guild_id: int, actions: list[dict]) -> list[dict]:
+        return []
+
+    monkeypatch.setattr(dispatcher.suspension, "is_suspended", lambda plugin_id: False)
+    monkeypatch.setattr(dispatcher, "execute_plugin_event", fake_execute_plugin_event)
+    monkeypatch.setattr(dispatcher, "_execute_actions", fake_execute_actions)
+
+    assert await dispatcher.dispatch_event(1111, "on_message", {"content": "first"}) is True
+    assert await dispatcher.dispatch_event(1111, "on_message", {"content": "second"}) is True
+    assert await dispatcher.dispatch_event(1111, "on_message", {"content": "third"}) is False
+
+    async with plugin_database.execute(
+        "SELECT outcome FROM plugin_execution_log WHERE plugin_id = ? ORDER BY log_id",
+        (plugin_id,),
+    ) as cursor:
+        rows = await cursor.fetchall()
+    quota.clear_usage(1111, plugin_id)
+
+    assert [row[0] for row in rows] == ["success", "success", "quota_exceeded"]

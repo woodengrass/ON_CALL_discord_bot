@@ -19,6 +19,8 @@ RESOURCE_LIMIT_KEYS = {
     "instruction_limit",
     "memory_limit_bytes",
 }
+QUOTA_LIMIT_KEYS = {"execution_quota", "action_quota"}
+RESOLVED_LIMIT_KEYS = RESOURCE_LIMIT_KEYS | QUOTA_LIMIT_KEYS
 TIER_CONFIG_KEYS = RESOURCE_LIMIT_KEYS | {"allowed", "execution_quota", "action_quota"}
 
 _event_subscription_cache: dict[tuple[int, tuple[str, ...]], tuple[float, bool]] = {}
@@ -1316,19 +1318,21 @@ async def mark_guild_notification_sent(notification_id: int) -> bool:
 
 async def resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
     """
-    解析指定安裝的五項資源限制，套用「個別覆蓋 → 外掛×方案設定 → 平台常數」優先順序。
+    解析指定安裝的七項資源限制，套用「個別覆蓋 → 外掛×方案設定 → 平台常數」優先順序。
 
     Args:
         guild_id: 伺服器 ID
         plugin_id: 外掛 ID
 
     Returns:
-        五項資源限制的最終值
+        七項資源限制的最終值
     """
-    from core import plugin_storage_repository
+    from core import plugin_storage_repository, quota
     from sandbox import engine
 
     defaults = {
+        "execution_quota": quota.DEFAULT_EXECUTION_QUOTA_PER_MINUTE,
+        "action_quota": quota.DEFAULT_ACTION_QUOTA_PER_MINUTE,
         "storage_key_length_limit": plugin_storage_repository.MAX_STORAGE_KEY_LENGTH,
         "storage_value_bytes_limit": plugin_storage_repository.MAX_STORAGE_VALUE_BYTES,
         "storage_keys_per_installation_limit": plugin_storage_repository.MAX_STORAGE_KEYS_PER_INSTALLATION,
@@ -1337,14 +1341,19 @@ async def resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
     }
     tier_name = await get_guild_resource_tier(guild_id)
     tier_config = await get_plugin_tier_config(plugin_id, tier_name) or {}
-    resolved = {key: tier_config.get(key) or defaults[key] for key in RESOURCE_LIMIT_KEYS}
+    resolved = {key: tier_config.get(key) or defaults[key] for key in RESOLVED_LIMIT_KEYS}
     installation = await get_installation(guild_id, plugin_id)
-    if installation is None or installation.get("resource_overrides_json") is None:
+    if installation is None:
         return resolved
-    overrides = json.loads(installation["resource_overrides_json"])
-    _validate_resource_overrides(overrides)
-    for key, value in overrides.items():
-        resolved[key] = value
+    if installation["execution_quota_override"] is not None:
+        resolved["execution_quota"] = installation["execution_quota_override"]
+    if installation["action_quota_override"] is not None:
+        resolved["action_quota"] = installation["action_quota_override"]
+    if installation.get("resource_overrides_json") is not None:
+        overrides = json.loads(installation["resource_overrides_json"])
+        _validate_resource_overrides(overrides)
+        for key, value in overrides.items():
+            resolved[key] = value
     return resolved
 
 

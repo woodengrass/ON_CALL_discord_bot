@@ -1,8 +1,6 @@
 import time
 from collections import deque
 
-from core.repository import get_installation
-
 DEFAULT_EXECUTION_QUOTA_PER_MINUTE = 60
 DEFAULT_ACTION_QUOTA_PER_MINUTE = 30
 
@@ -52,21 +50,21 @@ def _prune_window(timestamps: deque, now: float) -> None:
         timestamps.popleft()
 
 
-async def check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bool:
+async def check_and_consume_execution_quota(
+    guild_id: int, plugin_id: str, limit_override: int | None = None
+) -> bool:
     """
     檢查並消耗一次執行配額，配額用完時不消耗、直接回傳 False。
 
     Args:
         guild_id: 伺服器 ID
         plugin_id: 外掛 ID
+        limit_override: 已解析的執行配額；None 代表使用平台預設值
 
     Returns:
         True 表示配額足夠、已計入這次執行；False 表示配額已用完
     """
-    installation = await get_installation(guild_id, plugin_id)
-    limit = DEFAULT_EXECUTION_QUOTA_PER_MINUTE
-    if installation is not None and installation["execution_quota_override"] is not None:
-        limit = installation["execution_quota_override"]
+    limit = limit_override if limit_override is not None else DEFAULT_EXECUTION_QUOTA_PER_MINUTE
 
     key = (guild_id, plugin_id)
     timestamps = _execution_timestamps.setdefault(key, deque())
@@ -80,7 +78,9 @@ async def check_and_consume_execution_quota(guild_id: int, plugin_id: str) -> bo
     return True
 
 
-async def check_and_consume_action_quota(guild_id: int, plugin_id: str, action_count: int) -> bool:
+async def check_and_consume_action_quota(
+    guild_id: int, plugin_id: str, action_count: int, limit_override: int | None = None
+) -> bool:
     """
     檢查並消耗指定數量的動作配額，配額不足時完全不消耗、直接回傳 False。
 
@@ -88,14 +88,12 @@ async def check_and_consume_action_quota(guild_id: int, plugin_id: str, action_c
         guild_id: 伺服器 ID
         plugin_id: 外掛 ID
         action_count: 這次要執行的動作數量
+        limit_override: 已解析的動作配額；None 代表使用平台預設值
 
     Returns:
         True 表示配額足夠、已計入這次的動作數量；False 表示配額不足
     """
-    installation = await get_installation(guild_id, plugin_id)
-    limit = DEFAULT_ACTION_QUOTA_PER_MINUTE
-    if installation is not None and installation["action_quota_override"] is not None:
-        limit = installation["action_quota_override"]
+    limit = limit_override if limit_override is not None else DEFAULT_ACTION_QUOTA_PER_MINUTE
 
     key = (guild_id, plugin_id)
     timestamps = _action_timestamps.setdefault(key, deque())

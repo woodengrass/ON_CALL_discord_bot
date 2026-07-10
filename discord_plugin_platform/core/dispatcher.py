@@ -77,7 +77,7 @@ async def dispatch_event(
     """
     把 Discord 事件分派給該伺服器已安裝、有訂閱這個事件的外掛執行。
 
-    流程：停權檢查 → 執行次數配額檢查 → 建立沙箱執行 → 驗證動作清單 →
+    流程：停權檢查 → 資源限制解析 → 執行次數配額檢查 → 建立沙箱執行 → 驗證動作清單 →
     動作次數配額檢查 → 真正執行動作 → 記錄稽核紀錄。
 
     Args:
@@ -104,7 +104,12 @@ async def dispatch_event(
         if suspension.is_suspended(plugin_id):
             continue  # 已停權，完全不建立沙箱，不消耗任何執行資源
 
-        if not await quota.check_and_consume_execution_quota(guild_id, plugin_id):
+        resource_limits = await repository.resolve_resource_limits(guild_id, plugin_id)
+        if not await quota.check_and_consume_execution_quota(
+            guild_id,
+            plugin_id,
+            limit_override=resource_limits["execution_quota"],
+        ):
             await repository.log_execution(guild_id, plugin_id, event_type, "[]", 0, "quota_exceeded")
             continue
 
@@ -122,9 +127,6 @@ async def dispatch_event(
             continue
 
         granted_capabilities = set(json.loads(installation["granted_capabilities_json"]))
-        resource_limits = None
-        if "resource_overrides_json" in installation:
-            resource_limits = await repository.resolve_resource_limits(guild_id, plugin_id)
         needs_storage_transaction = bool(granted_capabilities & _STORAGE_CAPABILITY_NAMES)
         started_at = time.monotonic()
         execution_db = None
@@ -184,7 +186,12 @@ async def dispatch_event(
             )
             continue
 
-        if actions and not await quota.check_and_consume_action_quota(guild_id, plugin_id, len(actions)):
+        if actions and not await quota.check_and_consume_action_quota(
+            guild_id,
+            plugin_id,
+            len(actions),
+            limit_override=resource_limits["action_quota"],
+        ):
             await repository.log_execution(guild_id, plugin_id, event_type, "[]", execution_ms, "quota_exceeded")
             continue
 
