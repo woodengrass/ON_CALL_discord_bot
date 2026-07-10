@@ -24,6 +24,15 @@ async def list_tiers(operator: str = Depends(get_current_operator)) -> list[dict
     return await repository.list_resource_tiers()
 
 
+@router.get("/resource-defaults")
+async def get_resource_defaults(operator: str = Depends(get_current_operator)) -> dict:
+    """
+    取得七項資源限制目前的平台常數預設值，讓核准/方案設定表單可以預先帶入合理數值，
+    不用操作者自己猜測數字，見 design.md I.2。
+    """
+    return repository.get_platform_resource_defaults()
+
+
 @router.post("", response_model=ResourceTierResponse)
 async def create_tier(request: ResourceTierCreateRequest, operator: str = Depends(get_current_operator)) -> dict:
     """

@@ -620,3 +620,10 @@ async def test_list_known_guild_ids_unions_all_sources(plugin_database: aiosqlit
     await repository.create_installation(3333, "plugin_a", "1.0.0", [])
 
     assert await repository.list_known_guild_ids() == [1111, 2222, 3333]
+
+
+def test_get_platform_resource_defaults_covers_all_resolved_keys() -> None:
+    defaults = repository.get_platform_resource_defaults()
+
+    assert set(defaults) == repository.RESOLVED_LIMIT_KEYS
+    assert all(isinstance(value, int) for value in defaults.values())

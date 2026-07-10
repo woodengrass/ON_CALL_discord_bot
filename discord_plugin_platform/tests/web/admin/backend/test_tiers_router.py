@@ -57,3 +57,19 @@ async def test_get_plugin_tier_config_404_when_not_set(client: TestClient) -> No
 
     response = client.get("/api/tiers/default/plugins/temp_role_punishment")
     assert response.status_code == 404
+
+
+async def test_get_resource_defaults(client: TestClient) -> None:
+    response = client.get("/api/tiers/resource-defaults")
+
+    assert response.status_code == 200
+    body = response.json()
+    assert set(body) == {
+        "execution_quota",
+        "action_quota",
+        "storage_key_length_limit",
+        "storage_value_bytes_limit",
+        "storage_keys_per_installation_limit",
+        "instruction_limit",
+        "memory_limit_bytes",
+    }

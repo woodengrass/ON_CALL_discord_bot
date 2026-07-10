@@ -5,8 +5,9 @@
 <div class="layout">
   <div class="sidebar">
     <div class="panel">
+      <input type="text" id="guild-search-input" class="search-input" placeholder="搜尋 guild_id...">
       <label>
-        前往伺服器（輸入 guild_id）
+        前往新伺服器（輸入尚未出現過的 guild_id）
         <input type="text" id="guild-jump-input" placeholder="guild_id">
       </label>
       <button class="primary" id="guild-jump-button">前往</button>
@@ -19,7 +20,7 @@
       <label>tier_name<input type="text" id="new-tier-name"></label>
       <label>display_order<input type="number" id="new-tier-order" value="0"></label>
       <label>description<input type="text" id="new-tier-description"></label>
-      <button id="create-tier-button">建立方案</button>
+      <button class="primary" id="create-tier-button">建立方案</button>
     </div>
   </div>
   <div class="main">
@@ -27,19 +28,34 @@
     <div id="guild-detail"><p class="empty-state">從左側選擇或輸入伺服器 ID。</p></div>
   </div>
 </div>
+<datalist id="approved-plugin-options"></datalist>
 {% endblock %}
 {% block scripts %}
 <script>
-async function loadGuildList() {
-  const guildIds = await apiGet("/api/guilds");
+let knownGuildIds = [];
+let approvedPluginIds = [];
+
+async function loadApprovedPluginOptions() {
+  const plugins = await apiGet("/api/plugins?status=approved");
+  approvedPluginIds = plugins.map((plugin) => plugin.plugin_id);
+  const datalist = document.getElementById("approved-plugin-options");
+  datalist.innerHTML = "";
+  for (const pluginId of approvedPluginIds) {
+    datalist.appendChild(el("option", { value: pluginId }));
+  }
+}
+
+function renderGuildList() {
   const container = document.getElementById("guild-list");
+  const query = document.getElementById("guild-search-input").value.trim();
+  const filtered = knownGuildIds.filter((guildId) => !query || String(guildId).includes(query));
   container.innerHTML = "";
-  if (guildIds.length === 0) {
-    container.appendChild(el("p", { class: "empty-state", text: "目前沒有任何伺服器資料。" }));
+  if (filtered.length === 0) {
+    container.appendChild(el("p", { class: "empty-state", text: "沒有符合條件的伺服器。" }));
     return;
   }
   const selected = getSelectedParam("id");
-  for (const guildId of guildIds) {
+  for (const guildId of filtered) {
     container.appendChild(el("a", {
       class: "list-item" + (String(guildId) === selected ? " active" : ""),
       href: "?id=" + guildId,
@@ -49,6 +65,11 @@ async function loadGuildList() {
       },
     }, [el("div", { class: "list-item-title", text: String(guildId) })]));
   }
+}
+
+async function loadGuildList() {
+  knownGuildIds = await apiGet("/api/guilds");
+  renderGuildList();
 }
 
 async function loadTierList() {
@@ -63,6 +84,13 @@ async function loadTierList() {
         class: "danger",
         text: "刪除",
         onclick: async () => {
+          const confirmed = await confirmDialog(
+            "確定要刪除方案「" + tier.tier_name + "」嗎？已套用此方案的伺服器與外掛設定會受影響。",
+            { confirmLabel: "刪除", danger: true }
+          );
+          if (!confirmed) {
+            return;
+          }
           try {
             await apiDelete("/api/tiers/" + encodeURIComponent(tier.tier_name));
             showSuccess("banner", "已刪除方案。");
@@ -78,12 +106,19 @@ async function loadTierList() {
 }
 
 document.getElementById("create-tier-button").addEventListener("click", async () => {
+  const tierName = document.getElementById("new-tier-name").value.trim();
+  if (!tierName) {
+    showError("banner", new Error("tier_name 不能是空的"));
+    return;
+  }
   try {
     await apiPost("/api/tiers", {
-      tier_name: document.getElementById("new-tier-name").value,
+      tier_name: tierName,
       display_order: Number(document.getElementById("new-tier-order").value),
       description: document.getElementById("new-tier-description").value,
     });
+    document.getElementById("new-tier-name").value = "";
+    document.getElementById("new-tier-description").value = "";
     showSuccess("banner", "已建立方案。");
     await loadTierList();
   } catch (error) {
@@ -91,12 +126,86 @@ document.getElementById("create-tier-button").addEventListener("click", async ()
   }
 });
 
+document.getElementById("guild-search-input").addEventListener("input", debounce(renderGuildList, 150));
+
 document.getElementById("guild-jump-button").addEventListener("click", () => {
   const guildId = document.getElementById("guild-jump-input").value.trim();
   if (guildId) {
     selectGuild(guildId);
   }
 });
+
+function openInstallationEditDialog(guildId, installation) {
+  return new Promise((resolve) => {
+    const executionInput = el("input", {
+      type: "number", placeholder: "留空恢復平台預設",
+      ...(installation.execution_quota_override !== null ? { value: String(installation.execution_quota_override) } : {}),
+    });
+    const actionInput = el("input", {
+      type: "number", placeholder: "留空恢復平台預設",
+      ...(installation.action_quota_override !== null ? { value: String(installation.action_quota_override) } : {}),
+    });
+    const existingOverrides = installation.resource_overrides_json ? JSON.parse(installation.resource_overrides_json) : {};
+    const resourceInputs = {};
+    const resourceFields = [
+      "storage_key_length_limit", "storage_value_bytes_limit", "storage_keys_per_installation_limit",
+      "instruction_limit", "memory_limit_bytes",
+    ];
+    const resourceLabels = resourceFields.map((key) => {
+      const input = el("input", {
+        type: "number", placeholder: "留空使用方案/平台預設值",
+        ...(existingOverrides[key] !== undefined ? { value: String(existingOverrides[key]) } : {}),
+      });
+      resourceInputs[key] = input;
+      return el("label", { text: key }, [input]);
+    });
+
+    const overlay = el("div", { class: "dialog-overlay" });
+    const closeWith = (value) => {
+      overlay.classList.remove("visible");
+      setTimeout(() => overlay.remove(), 150);
+      resolve(value);
+    };
+    const dialog = el("div", { class: "dialog", style: "width: min(560px, 92vw);" }, [
+      el("p", { class: "dialog-message", text: "調整「" + installation.plugin_id + "」在伺服器 " + guildId + " 的配額與資源覆蓋" }),
+      el("h3", { text: "配額覆蓋" }),
+      el("div", { class: "field-grid" }, [
+        el("label", { text: "execution_quota" }, [executionInput]),
+        el("label", { text: "action_quota" }, [actionInput]),
+      ]),
+      el("h3", { text: "資源覆蓋" }),
+      el("div", { class: "field-grid" }, resourceLabels),
+      el("div", { class: "dialog-actions" }, [
+        el("button", { text: "取消", onclick: () => closeWith(null) }),
+        el("button", {
+          text: "儲存",
+          class: "primary",
+          onclick: () => {
+            const overrides = {};
+            for (const [key, input] of Object.entries(resourceInputs)) {
+              if (input.value !== "") {
+                overrides[key] = Number(input.value);
+              }
+            }
+            closeWith({
+              executionQuota: executionInput.value === "" ? null : Number(executionInput.value),
+              actionQuota: actionInput.value === "" ? null : Number(actionInput.value),
+              overrides,
+            });
+          },
+        }),
+      ]),
+    ]);
+    overlay.appendChild(dialog);
+    overlay.addEventListener("click", (event) => {
+      if (event.target === overlay) {
+        closeWith(null);
+      }
+    });
+    document.body.appendChild(overlay);
+    requestAnimationFrame(() => overlay.classList.add("visible"));
+  });
+}
 
 async function renderGuildDetail(guildId) {
   const container = document.getElementById("guild-detail");
@@ -126,7 +235,7 @@ async function renderGuildDetail(guildId) {
   ]));
 
   const blocks = await apiGet("/api/guilds/" + encodeURIComponent(guildId) + "/blocks");
-  const blocksBody = el("tbody", {}, blocks.map((block) => el("tr", {}, [
+  const blocksBody = el("tbody", {}, blocks.length ? blocks.map((block) => el("tr", {}, [
     el("td", { text: block.plugin_id }),
     el("td", { text: block.blocked_at }),
     el("td", { text: block.reason || "" }),
@@ -134,6 +243,10 @@ async function renderGuildDetail(guildId) {
       class: "danger",
       text: "解除封鎖",
       onclick: async () => {
+        const confirmed = await confirmDialog("確定要解除「" + block.plugin_id + "」的封鎖嗎？", { confirmLabel: "解除封鎖" });
+        if (!confirmed) {
+          return;
+        }
         try {
           await apiDelete("/api/guilds/" + encodeURIComponent(guildId) + "/blocks/" + encodeURIComponent(block.plugin_id));
           showSuccess("banner", "已解除封鎖。");
@@ -143,8 +256,9 @@ async function renderGuildDetail(guildId) {
         }
       },
     })]),
-  ])));
-  const blockPluginInput = el("input", { type: "text", placeholder: "plugin_id" });
+  ])) : [el("tr", {}, [el("td", { colspan: "4", class: "empty-state", text: "沒有封鎖任何外掛。" })])]);
+
+  const blockPluginInput = el("input", { type: "text", placeholder: "plugin_id", list: "approved-plugin-options" });
   const blockReasonInput = el("input", { type: "text", placeholder: "原因（選填）" });
   container.appendChild(el("div", { class: "panel" }, [
     el("h3", { text: "封鎖名單" }),
@@ -154,9 +268,12 @@ async function renderGuildDetail(guildId) {
       ])]),
       blocksBody,
     ]),
-    el("label", { text: "封鎖外掛" }, [blockPluginInput]),
-    el("label", { text: "原因" }, [blockReasonInput]),
+    el("div", { class: "field-grid" }, [
+      el("label", { text: "封鎖外掛" }, [blockPluginInput]),
+      el("label", { text: "原因" }, [blockReasonInput]),
+    ]),
     el("button", {
+      class: "danger",
       text: "封鎖",
       onclick: async () => {
         if (!blockPluginInput.value.trim()) {
@@ -177,44 +294,62 @@ async function renderGuildDetail(guildId) {
   ]));
 
   const installations = await apiGet("/api/guilds/" + encodeURIComponent(guildId) + "/installations");
-  const installationsBody = el("tbody", {}, installations.map((installation) => el("tr", {}, [
+  const installationsBody = el("tbody", {}, installations.length ? installations.map((installation) => el("tr", {}, [
     el("td", { text: installation.plugin_id }),
     el("td", { text: installation.installed_version }),
-    el("td", { text: String(installation.execution_quota_override) }),
-    el("td", { text: String(installation.action_quota_override) }),
-    el("td", { text: installation.resource_overrides_json || "" }),
-    el("td", {}, [el("button", {
-      class: "danger",
-      text: "解除安裝",
-      onclick: async () => {
-        try {
-          await apiDelete(
-            "/api/guilds/" + encodeURIComponent(guildId) + "/installations/" + encodeURIComponent(installation.plugin_id)
+    el("td", { text: installation.execution_quota_override === null ? "預設" : String(installation.execution_quota_override) }),
+    el("td", { text: installation.action_quota_override === null ? "預設" : String(installation.action_quota_override) }),
+    el("td", { text: installation.resource_overrides_json ? "已覆蓋" : "預設" }),
+    el("td", {}, [
+      el("button", {
+        text: "調整配額 / 資源",
+        onclick: async () => {
+          const result = await openInstallationEditDialog(guildId, installation);
+          if (result === null) {
+            return;
+          }
+          try {
+            await apiPut(
+              "/api/guilds/" + encodeURIComponent(guildId) + "/installations/" + encodeURIComponent(installation.plugin_id) + "/quota-override",
+              { execution_quota: result.executionQuota, action_quota: result.actionQuota }
+            );
+            await apiPut(
+              "/api/guilds/" + encodeURIComponent(guildId) + "/installations/" + encodeURIComponent(installation.plugin_id) + "/resource-overrides",
+              result.overrides
+            );
+            showSuccess("banner", "已更新配額與資源覆蓋。");
+            await renderGuildDetail(guildId);
+          } catch (error) {
+            showError("banner", error);
+          }
+        },
+      }),
+      el("button", {
+        class: "danger",
+        text: "解除安裝",
+        onclick: async () => {
+          const confirmed = await confirmDialog(
+            "確定要從伺服器 " + guildId + " 解除安裝「" + installation.plugin_id + "」嗎？",
+            { confirmLabel: "解除安裝", danger: true }
           );
-          showSuccess("banner", "已解除安裝。");
-          await renderGuildDetail(guildId);
-        } catch (error) {
-          showError("banner", error);
-        }
-      },
-    })]),
-  ])));
+          if (!confirmed) {
+            return;
+          }
+          try {
+            await apiDelete(
+              "/api/guilds/" + encodeURIComponent(guildId) + "/installations/" + encodeURIComponent(installation.plugin_id)
+            );
+            showSuccess("banner", "已解除安裝。");
+            await renderGuildDetail(guildId);
+          } catch (error) {
+            showError("banner", error);
+          }
+        },
+      }),
+    ]),
+  ])) : [el("tr", {}, [el("td", { colspan: "6", class: "empty-state", text: "尚未安裝任何外掛。" })])]);
 
-  const installPluginInput = el("input", { type: "text", placeholder: "plugin_id" });
-  const quotaPluginInput = el("input", { type: "text", placeholder: "plugin_id" });
-  const quotaExecutionInput = el("input", { type: "number", placeholder: "留空恢復預設" });
-  const quotaActionInput = el("input", { type: "number", placeholder: "留空恢復預設" });
-  const resourcePluginInput = el("input", { type: "text", placeholder: "plugin_id" });
-  const resourceInputs = {};
-  const resourceFields = [
-    "storage_key_length_limit", "storage_value_bytes_limit", "storage_keys_per_installation_limit",
-    "instruction_limit", "memory_limit_bytes",
-  ];
-  const resourceLabels = resourceFields.map((key) => {
-    const input = el("input", { type: "number", placeholder: "留空使用預設值" });
-    resourceInputs[key] = input;
-    return el("label", { text: key }, [input]);
-  });
+  const installPluginInput = el("input", { type: "text", placeholder: "plugin_id", list: "approved-plugin-options" });
 
   container.appendChild(el("div", { class: "panel" }, [
     el("h3", { text: "安裝管理" }),
@@ -226,10 +361,9 @@ async function renderGuildDetail(guildId) {
       ])]),
       installationsBody,
     ]),
-
     el("fieldset", {}, [
       el("legend", { text: "安裝外掛" }),
-      el("label", { text: "plugin_id" }, [installPluginInput]),
+      el("label", { text: "plugin_id（僅列出已核准的外掛）" }, [installPluginInput]),
       el("button", {
         class: "primary",
         text: "安裝",
@@ -249,66 +383,6 @@ async function renderGuildDetail(guildId) {
         },
       }),
     ]),
-
-    el("fieldset", {}, [
-      el("legend", { text: "調整配額覆蓋" }),
-      el("label", { text: "plugin_id" }, [quotaPluginInput]),
-      el("div", { class: "field-grid" }, [
-        el("label", { text: "execution_quota" }, [quotaExecutionInput]),
-        el("label", { text: "action_quota" }, [quotaActionInput]),
-      ]),
-      el("button", {
-        text: "儲存配額覆蓋",
-        onclick: async () => {
-          if (!quotaPluginInput.value.trim()) {
-            return;
-          }
-          try {
-            await apiPut(
-              "/api/guilds/" + encodeURIComponent(guildId) + "/installations/" + encodeURIComponent(quotaPluginInput.value.trim()) + "/quota-override",
-              {
-                execution_quota: quotaExecutionInput.value === "" ? null : Number(quotaExecutionInput.value),
-                action_quota: quotaActionInput.value === "" ? null : Number(quotaActionInput.value),
-              }
-            );
-            showSuccess("banner", "已更新配額覆蓋。");
-            await renderGuildDetail(guildId);
-          } catch (error) {
-            showError("banner", error);
-          }
-        },
-      }),
-    ]),
-
-    el("fieldset", {}, [
-      el("legend", { text: "調整資源覆蓋" }),
-      el("label", { text: "plugin_id" }, [resourcePluginInput]),
-      el("div", { class: "field-grid" }, resourceLabels),
-      el("button", {
-        text: "儲存資源覆蓋",
-        onclick: async () => {
-          if (!resourcePluginInput.value.trim()) {
-            return;
-          }
-          const overrides = {};
-          for (const [key, input] of Object.entries(resourceInputs)) {
-            if (input.value !== "") {
-              overrides[key] = Number(input.value);
-            }
-          }
-          try {
-            await apiPut(
-              "/api/guilds/" + encodeURIComponent(guildId) + "/installations/" + encodeURIComponent(resourcePluginInput.value.trim()) + "/resource-overrides",
-              overrides
-            );
-            showSuccess("banner", "已更新資源覆蓋。");
-            await renderGuildDetail(guildId);
-          } catch (error) {
-            showError("banner", error);
-          }
-        },
-      }),
-    ]),
   ]));
 }
 
@@ -316,7 +390,9 @@ async function selectGuild(guildId) {
   setSelectedParam("id", guildId);
   clearBanner("banner");
   try {
-    await renderGuildDetail(guildId);
+    await withLoading("guild-detail", "載入伺服器資料...", async () => {
+      await renderGuildDetail(guildId);
+    });
     await loadGuildList();
   } catch (error) {
     showError("banner", error);
@@ -324,8 +400,7 @@ async function selectGuild(guildId) {
 }
 
 async function init() {
-  await loadTierList();
-  await loadGuildList();
+  await Promise.all([loadTierList(), loadGuildList(), loadApprovedPluginOptions()]);
   const selected = getSelectedParam("id");
   if (selected) {
     await selectGuild(selected);

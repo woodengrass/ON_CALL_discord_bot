@@ -1358,6 +1358,28 @@ async def mark_guild_notification_sent(notification_id: int) -> bool:
     return cursor.rowcount > 0
 
 
+def get_platform_resource_defaults() -> dict:
+    """
+    取得七項資源限制目前的平台常數預設值，供操作介面在方案/覆蓋表單裡預先帶入，
+    見 design.md I.2：欄位缺漏代表「這項用平台預設值」，這裡回傳的就是那個值。
+
+    Returns:
+        七項資源限制的平台預設值
+    """
+    from core import plugin_storage_repository, quota
+    from sandbox import engine
+
+    return {
+        "execution_quota": quota.DEFAULT_EXECUTION_QUOTA_PER_MINUTE,
+        "action_quota": quota.DEFAULT_ACTION_QUOTA_PER_MINUTE,
+        "storage_key_length_limit": plugin_storage_repository.MAX_STORAGE_KEY_LENGTH,
+        "storage_value_bytes_limit": plugin_storage_repository.MAX_STORAGE_VALUE_BYTES,
+        "storage_keys_per_installation_limit": plugin_storage_repository.MAX_STORAGE_KEYS_PER_INSTALLATION,
+        "instruction_limit": engine.INSTRUCTION_LIMIT,
+        "memory_limit_bytes": engine.MEMORY_LIMIT_BYTES,
+    }
+
+
 async def resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
     """
     解析指定安裝的七項資源限制，套用「個別覆蓋 → 外掛×方案設定 → 平台常數」優先順序。
@@ -1369,18 +1391,7 @@ async def resolve_resource_limits(guild_id: int, plugin_id: str) -> dict:
     Returns:
         七項資源限制的最終值
     """
-    from core import plugin_storage_repository, quota
-    from sandbox import engine
-
-    defaults = {
-        "execution_quota": quota.DEFAULT_EXECUTION_QUOTA_PER_MINUTE,
-        "action_quota": quota.DEFAULT_ACTION_QUOTA_PER_MINUTE,
-        "storage_key_length_limit": plugin_storage_repository.MAX_STORAGE_KEY_LENGTH,
-        "storage_value_bytes_limit": plugin_storage_repository.MAX_STORAGE_VALUE_BYTES,
-        "storage_keys_per_installation_limit": plugin_storage_repository.MAX_STORAGE_KEYS_PER_INSTALLATION,
-        "instruction_limit": engine.INSTRUCTION_LIMIT,
-        "memory_limit_bytes": engine.MEMORY_LIMIT_BYTES,
-    }
+    defaults = get_platform_resource_defaults()
     tier_name = await get_guild_resource_tier(guild_id)
     tier_config = await get_plugin_tier_config(plugin_id, tier_name) or {}
     resolved = {key: tier_config.get(key) or defaults[key] for key in RESOLVED_LIMIT_KEYS}

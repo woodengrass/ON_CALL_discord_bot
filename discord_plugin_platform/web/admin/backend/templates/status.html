@@ -23,29 +23,31 @@
 {% block scripts %}
 <script>
 async function loadStatusSummary() {
-  const plugins = await apiGet("/api/plugins");
-  const counts = {};
-  for (const plugin of plugins) {
-    counts[plugin.status] = (counts[plugin.status] || 0) + 1;
-  }
-  const container = document.getElementById("status-summary");
-  container.innerHTML = "";
-  container.appendChild(el("div", { class: "stat-card" }, [
-    el("div", { class: "stat-value", text: String(plugins.length) }),
-    el("div", { class: "stat-label", text: "外掛總數" }),
-  ]));
-  for (const [status, count] of Object.entries(counts)) {
+  await withLoading("status-summary", "載入外掛狀態...", async () => {
+    const plugins = await apiGet("/api/plugins");
+    const counts = {};
+    for (const plugin of plugins) {
+      counts[plugin.status] = (counts[plugin.status] || 0) + 1;
+    }
+    const container = document.getElementById("status-summary");
+    container.innerHTML = "";
     container.appendChild(el("div", { class: "stat-card" }, [
-      el("div", { class: "stat-value", text: String(count) }),
-      statusBadge(status),
+      el("div", { class: "stat-value", text: String(plugins.length) }),
+      el("div", { class: "stat-label", text: "外掛總數" }),
     ]));
-  }
+    for (const [status, count] of Object.entries(counts)) {
+      container.appendChild(el("div", { class: "stat-card" }, [
+        el("div", { class: "stat-value", text: String(count) }),
+        statusBadge(status),
+      ]));
+    }
 
-  const datalist = document.getElementById("plugin-id-options");
-  datalist.innerHTML = "";
-  for (const plugin of plugins) {
-    datalist.appendChild(el("option", { value: plugin.plugin_id }));
-  }
+    const datalist = document.getElementById("plugin-id-options");
+    datalist.innerHTML = "";
+    for (const plugin of plugins) {
+      datalist.appendChild(el("option", { value: plugin.plugin_id }));
+    }
+  });
 }
 
 document.getElementById("load-stats-button").addEventListener("click", async () => {
@@ -65,8 +67,11 @@ document.getElementById("load-stats-button").addEventListener("click", async () 
     params.set("since", since);
   }
   const query = params.toString() ? "?" + params.toString() : "";
+  document.getElementById("stats-outcomes").innerHTML = "";
   try {
-    const stats = await apiGet("/api/plugins/" + encodeURIComponent(pluginId) + "/stats" + query);
+    const stats = await withLoading("stats-result", "查詢中...", () =>
+      apiGet("/api/plugins/" + encodeURIComponent(pluginId) + "/stats" + query)
+    );
     const resultContainer = document.getElementById("stats-result");
     resultContainer.innerHTML = "";
     resultContainer.appendChild(el("div", { class: "stat-card" }, [
@@ -85,8 +90,16 @@ document.getElementById("load-stats-button").addEventListener("click", async () 
     const outcomesContainer = document.getElementById("stats-outcomes");
     outcomesContainer.innerHTML = "";
     for (const [outcome, count] of Object.entries(stats.outcome_counts)) {
-      const percentage = stats.total ? ((count / stats.total) * 100).toFixed(1) : "0.0";
-      outcomesContainer.appendChild(el("p", { text: outcome + "：" + count + " 次（" + percentage + "%）" }));
+      const percentage = stats.total ? (count / stats.total) * 100 : 0;
+      outcomesContainer.appendChild(el("div", { class: "outcome-row" }, [
+        el("div", { class: "outcome-label" }, [
+          statusBadge(outcome),
+          el("span", { text: count + " 次（" + percentage.toFixed(1) + "%）" }),
+        ]),
+        el("div", { class: "outcome-bar-track" }, [
+          el("div", { class: "outcome-bar-fill", style: "width: " + percentage.toFixed(1) + "%;" }),
+        ]),
+      ]));
     }
   } catch (error) {
     showError("banner", error);
