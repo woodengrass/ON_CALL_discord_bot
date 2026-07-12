@@ -2,11 +2,7 @@
 
 Discord bot 的 Lua 外掛市集平台：外掛在資源受限的沙箱**子行程**執行，透過能力（capability）API 與 Discord 互動，平台操作者透過網頁後台／終端機審核與治理。
 
-## 權威文件在哪裡
-
-- `design.md`（**本機檔案，被 .gitignore 排除**，只存在主開發機的 main worktree）：完整架構、安全模型、能力 API 規格、Track 分工與驗收標準、歷次複查結論。**動手前必讀**；讀不到（其他機器／雲端環境）就向使用者索取，不得憑猜測動工。
-- 專案根目錄 `CONVENTIONS.md`（同為本機檔案）：程式碼規範與多 agent 協作規則。
-- 本 README 只是進版控的摘要，供拿不到上述文件的環境至少知道現況與硬約束。
+完整架構設計、安全模型、能力 API 規格見 `design.md`（本機檔案）。
 
 ## 目前狀態（2026-07，Track A-I 已完成合併）
 
@@ -23,7 +19,6 @@ Discord bot 的 Lua 外掛市集平台：外掛在資源受限的沙箱**子行�
 - 測試：`cd discord_plugin_platform && python -m pytest`（依賴：`pip install -e .[dev]`）
 - 管理後台：`uvicorn web.admin.backend.main:app --host 127.0.0.1 --port 8010`（從本目錄啟動；注意下方資料庫路徑約束）
 - bot 行程：**尚不存在**，完整規劃見 design.md Track J
-- 合併回 main 前：專案根目錄 `python scripts/verify_before_merge.py`
 
 ## 硬性架構約束（違反會直接壞掉）
 
