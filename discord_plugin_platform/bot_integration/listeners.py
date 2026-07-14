@@ -352,6 +352,8 @@ def _format_guild_notification(notification_type: str, payload: dict) -> str:
         return f"外掛 {plugin_id} 已被平台永久封鎖並自動解除安裝。原因：{reason}"
     if notification_type == "plugin_suspended":
         return f"外掛 {plugin_id} 已被平台停權並自動解除安裝。"
+    if notification_type == "plugin_uninstalled":
+        return f"外掛 {plugin_id} 已解除安裝，其儲存的資料已一併清除。"
     return f"外掛平台通知：{notification_type}"
 
 

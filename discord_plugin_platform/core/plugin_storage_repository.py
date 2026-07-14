@@ -248,6 +248,25 @@ async def delete_all_storage_for_plugin(plugin_id: str) -> None:
     await db.commit()
 
 
+async def delete_storage_for_installation(guild_id: int, plugin_id: str) -> None:
+    """
+    刪除單一安裝的 KV 儲存資料，伺服器主動解除安裝外掛時呼叫。
+
+    只清 plugin_kv_store：plugin_scheduled_tasks 由
+    core.repository.delete_installation() 一併清掉，不用在這裡重複刪一次。
+
+    Args:
+        guild_id: 伺服器 ID
+        plugin_id: 外掛 ID
+    """
+    db = get_db()
+    await db.execute(
+        "DELETE FROM plugin_kv_store WHERE guild_id = ? AND plugin_id = ?",
+        (guild_id, plugin_id),
+    )
+    await db.commit()
+
+
 async def storage_list_keys(
     guild_id: int, plugin_id: str, prefix: str, db: aiosqlite.Connection | None = None
 ) -> list[str]:

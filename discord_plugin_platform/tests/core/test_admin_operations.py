@@ -4,7 +4,7 @@ from collections.abc import AsyncIterator
 import aiosqlite
 import pytest
 
-from core import admin_operations, database, repository
+from core import admin_operations, database, plugin_storage_repository, repository
 
 
 @pytest.fixture()
@@ -116,3 +116,38 @@ async def test_reject_plugin_version_validates_flagged_capabilities(
         await admin_operations.reject_plugin_version("temp_role_punishment", [], None, ["manage_roles"])
 
     assert await admin_operations.reject_plugin_version("temp_role_punishment", [], "too broad", ["storage"]) is True
+
+
+async def test_uninstall_plugin_clears_storage_and_enqueues_notification(
+    plugin_database: aiosqlite.Connection,
+) -> None:
+    await _submit_plugin(["storage"])
+    await admin_operations.approve_plugin_version("temp_role_punishment", {"default": _tier_config(True)})
+    await admin_operations.install_plugin(1111, "temp_role_punishment")
+    await plugin_storage_repository.storage_set(1111, "temp_role_punishment", "score", 42)
+    await plugin_storage_repository.create_scheduled_task(1111, "temp_role_punishment", 60, "task", {})
+
+    assert await admin_operations.uninstall_plugin(1111, "temp_role_punishment") is True
+
+    assert await plugin_storage_repository.storage_get(1111, "temp_role_punishment", "score") is None
+    assert await repository.get_installation(1111, "temp_role_punishment") is None
+    async with plugin_database.execute(
+        "SELECT COUNT(*) FROM plugin_scheduled_tasks WHERE guild_id = ? AND plugin_id = ?",
+        (1111, "temp_role_punishment"),
+    ) as cursor:
+        remaining_task_count = (await cursor.fetchone())[0]
+    assert remaining_task_count == 0
+
+    notifications = await repository.get_pending_guild_notifications()
+    assert len(notifications) == 1
+    assert notifications[0]["guild_id"] == 1111
+    assert notifications[0]["notification_type"] == "plugin_uninstalled"
+    assert json.loads(notifications[0]["payload_json"]) == {"plugin_id": "temp_role_punishment"}
+
+
+async def test_uninstall_plugin_missing_installation_does_not_enqueue_notification(
+    plugin_database: aiosqlite.Connection,
+) -> None:
+    assert await admin_operations.uninstall_plugin(1111, "does_not_exist") is False
+
+    assert await repository.get_pending_guild_notifications() == []

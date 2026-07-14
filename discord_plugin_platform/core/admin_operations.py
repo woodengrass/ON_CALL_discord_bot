@@ -313,7 +313,7 @@ async def install_plugin(guild_id: int, plugin_id: str) -> None:
 
 async def uninstall_plugin(guild_id: int, plugin_id: str) -> bool:
     """
-    解除安裝外掛並清理配額與訊息快取。
+    解除安裝外掛，清理配額、訊息快取與這個安裝的 storage，並 enqueue 伺服器通知。
 
     Args:
         guild_id: 伺服器 ID
@@ -325,6 +325,12 @@ async def uninstall_plugin(guild_id: int, plugin_id: str) -> bool:
     deleted = await repository.delete_installation(guild_id, plugin_id)
     if deleted:
         quota.clear_usage(guild_id, plugin_id)
+        await plugin_storage_repository.delete_storage_for_installation(guild_id, plugin_id)
+        await repository.enqueue_guild_notification(
+            guild_id,
+            "plugin_uninstalled",
+            {"plugin_id": plugin_id},
+        )
     if deleted and not await repository.guild_has_event_subscription(guild_id, MESSAGE_CACHE_EVENTS):
         message_cache.purge_guild(guild_id)
     return deleted

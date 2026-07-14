@@ -532,6 +532,13 @@ def test_format_guild_notification_unknown_type_has_fallback() -> None:
     assert "something_else" in text
 
 
+def test_format_guild_notification_uninstalled() -> None:
+    text = listeners._format_guild_notification("plugin_uninstalled", {"plugin_id": "temp_role_punishment"})
+
+    assert "temp_role_punishment" in text
+    assert "解除安裝" in text
+
+
 class FakeBotWithGuilds(FakeBot):
     """
     測試用 Bot，額外提供 get_guild()，供伺服器通知消費測試模擬找不到/找得到伺服器。
