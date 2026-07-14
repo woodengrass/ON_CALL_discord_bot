@@ -19,6 +19,7 @@ A multifunctional Discord bot built with Python 3.11 and discord.py. It combines
 - [Slash Commands](#slash-commands)
 - [Localization](#localization)
 - [Data and Logs](#data-and-logs)
+- [Database Backups](#database-backups)
 - [Project Structure](#project-structure)
 - [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
@@ -139,6 +140,7 @@ GOOGLE_SAFE_BROWSING_KEY=your_google_safe_browsing_key
 | `DISCORD_BOT_TOKEN` | Yes | Starts the Discord bot |
 | `GROQ_API_KEY` | No | Chat summaries and speech-to-text |
 | `GOOGLE_SAFE_BROWSING_KEY` | No | Malicious URL checks |
+| `BACKUP_RCLONE_REMOTE` | No | rclone remote name for offsite database backup sync to Google Drive, see Database Backups |
 
 `token.env` is excluded by `.gitignore` and must not be committed.
 
@@ -209,7 +211,63 @@ All persistent data lives in the SQLite database `data/bot.db` (WAL mode), inclu
 
 Logs rotate at 5 MB and retain up to five backups. Log files are ignored by Git. They may contain server, channel, and user IDs, so review them before sharing.
 
-SQLite runtime files and legacy JSON data files are ignored by Git and must not be committed. Back up `data/bot.db` regularly. Run only one bot process against a data directory to avoid concurrent database writes.
+SQLite runtime files and legacy JSON data files are ignored by Git and must not be committed. Run only one bot process against a data directory to avoid concurrent database writes. See Database Backups below for backing up `data/bot.db`.
+
+## Database Backups
+
+`scripts/backup_databases.py` provides a scheduled daily backup script with optional offsite sync to Google Drive.
+
+### How it works
+
+- Backs up using SQLite's official Online Backup API (`Connection.backup()`), not a plain file copy - `data/bot.db` runs in WAL mode, and copying the file directly risks grabbing a torn write mid-checkpoint. `backup()` guarantees a consistent snapshot even while the bot is actively writing.
+- Local output goes to `backups/bot_db/<date>.db`, keeping the last 7 daily backups plus every 1st-of-month snapshot indefinitely (never rotated away).
+- Run logs go to `logs/backup.log` (kept separate from `logs/bot.log` so scheduled runs don't interfere with the bot's own log rotation timing). The script exits with a non-zero code if any backup fails, so schedulers can detect failures.
+
+### Run it once manually
+
+```bash
+python scripts/backup_databases.py
+```
+
+### Schedule it daily
+
+Windows (Task Scheduler):
+
+```powershell
+schtasks /create /tn "HoneypotBotBackup" /tr "python C:\path\to\repo\scripts\backup_databases.py" /sc daily /st 03:00
+```
+
+Linux (cron, `crontab -e`):
+
+```
+0 3 * * * cd /path/to/repo && /path/to/venv/bin/python scripts/backup_databases.py
+```
+
+### Offsite sync to Google Drive (optional, strongly recommended)
+
+Local backups alone don't protect against the disk itself failing - offsite sync is the real protection. Steps:
+
+1. Install [rclone](https://rclone.org/downloads/).
+2. Run `rclone config` and choose, in order: `n` (new remote) -> a name of your choice (e.g. `gdrive`) -> storage type `Google Drive` -> keep defaults for the remaining prompts -> answer `y` to "Use auto config?", which opens a browser to sign in and authorize your Google account.
+3. Run `rclone lsd gdrive:` to confirm it can list folders in your Drive - that confirms authorization worked.
+4. Add to `token.env`:
+
+   ```dotenv
+   BACKUP_RCLONE_REMOTE=gdrive:honeypot-bot-backups
+   ```
+
+5. From then on, every run of `backup_databases.py` automatically `rclone copy`s the entire `backups/` folder there after the local backup succeeds. **Deliberately `copy`, not `sync`**: `sync` would delete remote files that local rotation already removed, meaning the offsite copy would inherit the 7-day local retention instead of being an independent safety net. `copy` only uploads incrementally and never deletes existing remote files - how long the offsite copies are kept is up to you to manage in Drive.
+6. If you run this on multiple machines (e.g. local development plus a production host), run `rclone config` separately on each machine, or securely copy over the configured `rclone.conf` file.
+
+If `BACKUP_RCLONE_REMOTE` is unset, or the `rclone` binary isn't found, the script only performs the local backup and this is not treated as a failure.
+
+### Restore drill
+
+An unverified backup is not a backup. Periodically rehearse a real restore:
+
+1. Stop the bot.
+2. Overwrite `data/bot.db` with the backup you want to restore, and delete any leftover `data/bot.db-wal` / `data/bot.db-shm` files.
+3. Restart the bot and confirm the data is intact.
 
 ## Project Structure
 
@@ -224,6 +282,7 @@ honeypot-discord-bot/
 |-- dev/                   # Local development tools excluded from version control
 |-- config/config.json     # Global configuration
 |-- data/                  # SQLite persistent data
+|-- scripts/               # Scheduled/ops scripts (e.g. database backups)
 |-- locales/languages.json # Localized text
 |-- .env.example           # Environment variable template
 |-- LICENSE                # GPL-3.0 license

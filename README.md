@@ -122,6 +122,7 @@ GOOGLE_SAFE_BROWSING_KEY=your_google_safe_browsing_key
 | `DISCORD_BOT_TOKEN` | 必要 | 啟動 Discord Bot |
 | `GROQ_API_KEY` | 選用 | 聊天摘要及語音轉文字 |
 | `GOOGLE_SAFE_BROWSING_KEY` | 選用 | 惡意網址檢查 |
+| `BACKUP_RCLONE_REMOTE` | 選用 | 資料庫備份異地同步到 Google 雲端硬碟的 rclone 遠端名稱，見〈資料庫備份〉 |
 
 `token.env` 已由 `.gitignore` 排除，請勿提交。
 
@@ -192,7 +193,63 @@ python bot.py
 
 日誌單檔上限 5 MB，最多保留 5 份備份，且已由 `.gitignore` 排除。日誌可能包含伺服器、頻道及使用者 ID，分享前應先移除不應公開的資訊。
 
-SQLite 執行期檔案與舊版 JSON 資料檔皆已由 `.gitignore` 排除，不應提交至版控。請定期備份 `data/bot.db`。同一資料目錄建議只執行一個 Bot 實例，避免多個程序同時寫入資料庫。
+SQLite 執行期檔案與舊版 JSON 資料檔皆已由 `.gitignore` 排除，不應提交至版控。同一資料目錄建議只執行一個 Bot 實例，避免多個程序同時寫入資料庫。資料庫備份見下一節。
+
+## 資料庫備份
+
+`scripts/backup_databases.py` 提供每日排程備份，搭配選用的 Google 雲端硬碟異地同步。
+
+### 備份機制
+
+- 用 SQLite 官方 Online Backup API（`Connection.backup()`）備份，不是單純複製檔案——`data/bot.db` 是 WAL 模式，直接複製檔案有機率拿到寫入中途的不一致狀態，`backup()` 保證即使機器人正在寫入也能拿到一致快照。
+- 本地輸出在 `backups/bot_db/<日期>.db`，保留最近 7 天的每日備份，另外每月 1 號的備份永久保留、不會被輪替刪除。
+- 執行紀錄寫進 `logs/backup.log`（跟 `logs/bot.log` 分開，避免排程執行時互相干擾輪替時機）；任何一項備份失敗，腳本會以非零結束碼結束，方便排程工具偵測失敗。
+
+### 手動執行一次
+
+```bash
+python scripts/backup_databases.py
+```
+
+### 設定每日排程
+
+Windows（工作排程器）：
+
+```powershell
+schtasks /create /tn "HoneypotBotBackup" /tr "python C:\path\to\repo\scripts\backup_databases.py" /sc daily /st 03:00
+```
+
+Linux（cron，`crontab -e`）：
+
+```
+0 3 * * * cd /path/to/repo && /path/to/venv/bin/python scripts/backup_databases.py
+```
+
+### 異地同步到 Google 雲端硬碟（選用，強烈建議設定）
+
+只有本地備份防不了硬碟本身故障，異地同步才是真正的保護。步驟：
+
+1. 安裝 [rclone](https://rclone.org/downloads/)。
+2. 執行 `rclone config`，依序選擇：`n`（新遠端）→ 自訂名稱（例如 `gdrive`）→ storage 類型選 `Google Drive` → 其餘選項一路保持預設按 Enter → 「Use auto config?」選 `y`，會開啟瀏覽器登入並授權你的 Google 帳號。
+3. 執行 `rclone lsd gdrive:` 確認能列出雲端硬碟裡的資料夾，代表授權成功。
+4. 在 `token.env` 加入：
+
+   ```dotenv
+   BACKUP_RCLONE_REMOTE=gdrive:honeypot-bot-backups
+   ```
+
+5. 之後每次 `backup_databases.py` 執行，本地備份成功後會自動 `rclone copy` 整個 `backups/` 資料夾同步過去。**刻意用 `copy` 不用 `sync`**：`sync` 會把本地輪替刪掉的舊備份連雲端那份也砍掉，`copy` 只增量上傳、不刪除雲端既有檔案，異地保留多久由你自己在雲端硬碟裡管理。
+6. 若同時在多台機器上跑（例如本機開發＋正式部署主機），每台機器都要各自跑一次 `rclone config`，或把設定好的 `rclone.conf` 設定檔安全地複製過去。
+
+未設定 `BACKUP_RCLONE_REMOTE`，或機器上找不到 `rclone` 執行檔時，腳本只做本地備份，不會被當成失敗。
+
+### 還原演練
+
+備份沒驗證過等於沒有，建議定期實際演練一次：
+
+1. 停止機器人。
+2. 用要還原的備份檔覆蓋 `data/bot.db`，並刪除殘留的 `data/bot.db-wal`、`data/bot.db-shm`（若存在）。
+3. 重新啟動機器人，確認資料完整。
 
 ## 專案結構
 
@@ -207,6 +264,7 @@ honeypot-discord-bot/
 |-- dev/                   # 本機開發工具（敏感檔案不進版控）
 |-- config/config.json     # 全域設定
 |-- data/                  # SQLite 持久化資料
+|-- scripts/               # 排程/維運腳本（例如資料庫備份）
 |-- locales/languages.json # 多語言文字
 |-- .env.example           # 環境變數範例
 |-- LICENSE                # GPL-3.0

@@ -50,6 +50,9 @@ data/warning.json
 data/guild_settings.json
 data/trigger.json
 
+# scripts/backup_databases.py 的本地備份輸出，含真實使用者/伺服器資料，不進版控
+backups/
+
 # 開發者測試用後門，含真實使用者 ID，不進版控
 dev/verification_backdoor.py
 
