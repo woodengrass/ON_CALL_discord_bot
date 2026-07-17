@@ -4,8 +4,8 @@ import logging
 from discord.ext import commands, tasks
 
 from core.config import CONFIG
-from core.i18n import i18n
 from core.guild_settings import GuildSettings
+from core.i18n import i18n
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +55,9 @@ class PeopleCounting(commands.Cog):
                 new_name = i18n.get_text("messages.count_channel_name", int(guild_id_str), count=member_count)
                 if channel.name != new_name:
                     await channel.edit(name=new_name)
-                    await GuildSettings.set_module_config(int(guild_id_str), "people_counting", "last_count", member_count)
+                    await GuildSettings.set_module_config(
+                        int(guild_id_str), "people_counting", "last_count", member_count
+                    )
                     print(f"[資訊] 更新人數計算 {guild.name}：{member_count}")
                     # 分散每個伺服器的改名請求，避免同一瞬間集中打 Discord API
                     await asyncio.sleep(EDIT_STAGGER_SECONDS)

@@ -3,9 +3,9 @@
 import discord
 from discord.ext import commands, tasks
 
-from core.i18n import i18n
 from core.audit_log_repository import add_log_entry
 from core.guild_settings import GuildSettings
+from core.i18n import i18n
 
 logger = logging.getLogger(__name__)
 
@@ -107,7 +107,10 @@ class HoneypotMonitor(commands.Cog):
             if announcement_id:
                 await self._announce_violation(int(announcement_id), message.author, message.content, guild_id)
 
-            if bot_member.guild_permissions.ban_members and bot_member.top_role.position > message.author.top_role.position:
+            if (
+                bot_member.guild_permissions.ban_members
+                and bot_member.top_role.position > message.author.top_role.position
+            ):
                 try:
                     reason = i18n.get_text("messages.ban_reason_honeypot", guild_id)
                     await message.guild.ban(message.author, reason=reason)
@@ -125,7 +128,10 @@ class HoneypotMonitor(commands.Cog):
             if announcement_id:
                 await self._announce_violation(int(announcement_id), message.author, message.content, guild_id)
 
-            if bot_member.guild_permissions.ban_members and bot_member.top_role.position > message.author.top_role.position:
+            if (
+                bot_member.guild_permissions.ban_members
+                and bot_member.top_role.position > message.author.top_role.position
+            ):
                 try:
                     reason = i18n.get_text("messages.ban_reason_spam", guild_id)
                     await message.guild.ban(message.author, reason=reason)

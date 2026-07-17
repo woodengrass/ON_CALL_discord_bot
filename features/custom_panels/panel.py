@@ -4,10 +4,9 @@ import uuid
 import discord
 from discord.ui import Button, ChannelSelect, Modal, RoleSelect, Select, TextInput, View
 
-from features.custom_panels.repository import CustomPanelStore
 from core.i18n import i18n
 from core.ui_constants import MODAL_TITLE_MAX_LENGTH, PANEL_TIMEOUT_SECONDS, TEXT_INPUT_LABEL_MAX_LENGTH, truncate_text
-
+from features.custom_panels.repository import CustomPanelStore
 
 logger = logging.getLogger(__name__)
 

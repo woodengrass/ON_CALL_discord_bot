@@ -7,8 +7,8 @@ from discord.ext import commands
 from dotenv import load_dotenv
 
 from core.database import close_db, init_db
-from core.i18n import i18n
 from core.guild_settings import GuildSettings
+from core.i18n import i18n
 from core.logging import configure_logging
 from features.custom_panels.repository import CustomPanelStore
 from features.tickets.repository import TicketStore

@@ -5,10 +5,10 @@ from collections import deque
 import discord
 from discord.ext import commands, tasks
 
-from core.config import CONFIG
-from core.i18n import i18n
 from core.audit_log_repository import add_log_entry
+from core.config import CONFIG
 from core.guild_settings import GuildSettings
+from core.i18n import i18n
 
 logger = logging.getLogger(__name__)
 

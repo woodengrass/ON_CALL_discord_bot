@@ -2,9 +2,9 @@
 
 import discord
 
-from core.ui_constants import PANEL_TIMEOUT_SECONDS
-from core.i18n import i18n
 from core.guild_settings import GuildSettings
+from core.i18n import i18n
+from core.ui_constants import PANEL_TIMEOUT_SECONDS
 
 logger = logging.getLogger(__name__)
 
@@ -230,7 +230,10 @@ class VerificationSettingSelect(discord.ui.Select):
         self.guild_id = guild_id
         self.parent_view = parent_view
         options = [
-            discord.SelectOption(label=i18n.get_text("ui.verification_restricted_role", guild_id), value="restricted_role"),
+            discord.SelectOption(
+                label=i18n.get_text("ui.verification_restricted_role", guild_id),
+                value="restricted_role",
+            ),
             discord.SelectOption(label=i18n.get_text("ui.verification_verified_role", guild_id), value="verified_role"),
             discord.SelectOption(label=i18n.get_text("ui.verification_review_role", guild_id), value="review_role"),
             discord.SelectOption(label=i18n.get_text("ui.verification_channel", guild_id), value="verify_channel"),
@@ -425,7 +428,11 @@ class VerificationSettingView(discord.ui.View):
         status_text = i18n.get_text(
             "messages.status_enabled" if config.get("enabled", False) else "messages.status_disabled", self.guild_id
         )
-        embed.add_field(name=i18n.get_text("messages.verification_status", self.guild_id), value=status_text, inline=True)
+        embed.add_field(
+            name=i18n.get_text("messages.verification_status", self.guild_id),
+            value=status_text,
+            inline=True,
+        )
 
         restricted_role_id = config.get("restricted_role_id")
         embed.add_field(

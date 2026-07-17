@@ -3,8 +3,8 @@
 import discord
 from discord.ext import commands
 
-from core.i18n import i18n
 from core.guild_settings import GuildSettings
+from core.i18n import i18n
 
 logger = logging.getLogger(__name__)
 
