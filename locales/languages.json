@@ -1171,10 +1171,15 @@
       "zh-CN": " 发生错误：找不到暂存资料",
       "en-US": " Error: Temporary data not found."
     },
+    "error_invalid_time_format": {
+      "zh-TW": " 格式錯誤：時間必須是有效的 24 小時制 HH:MM",
+      "zh-CN": " 格式错误：时间必须是有效的 24 小时制 HH:MM",
+      "en-US": " Format error: Time must be a valid 24-hour HH:MM."
+    },
     "error_invalid_days_format": {
-      "zh-TW": " 格式錯誤：日期必須是數字並用逗號分隔",
-      "zh-CN": " 格式错误：日期必须是数字并用逗号分隔",
-      "en-US": " Format error: Days must be numbers separated by commas."
+      "zh-TW": " 格式錯誤：日期必須是範圍內的整數並用逗號分隔",
+      "zh-CN": " 格式错误：日期必须是范围内的整数并用逗号分隔",
+      "en-US": " Format error: Days must be in-range integers separated by commas."
     },
     "error_channel_required": {
       "zh-TW": " 請至少選擇一個發送頻道！",
