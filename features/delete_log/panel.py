@@ -1,10 +1,14 @@
 ﻿import logging
+from typing import TYPE_CHECKING
 
 import discord
 
 from core.guild_settings import GuildSettings
 from core.i18n import i18n
 from core.ui_constants import PANEL_TIMEOUT_SECONDS
+
+if TYPE_CHECKING:
+    from hubs.server_setting.panel import ServerSettingView
 
 logger = logging.getLogger(__name__)
 

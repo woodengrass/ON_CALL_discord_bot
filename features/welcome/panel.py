@@ -1,7 +1,7 @@
 ﻿import discord
 
-from core.i18n import i18n
 from core.guild_settings import GuildSettings
+from core.i18n import i18n
 from core.ui_constants import PANEL_TIMEOUT_SECONDS
 
 

@@ -1,6 +1,5 @@
-﻿import random
-
-import logging
+﻿import logging
+import random
 
 import discord
 from discord import app_commands

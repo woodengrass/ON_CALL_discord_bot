@@ -1,5 +1,4 @@
 ﻿import json
-
 from typing import Any
 
 from core.database import get_db

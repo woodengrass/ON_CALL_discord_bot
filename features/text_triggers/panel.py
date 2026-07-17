@@ -2,8 +2,8 @@
 from discord.ui import Modal, TextInput
 
 from core.i18n import i18n
-from features.text_triggers.repository import add_trigger, delete_trigger, get_guild_triggers
 from core.ui_constants import MODAL_TITLE_MAX_LENGTH, PANEL_TIMEOUT_SECONDS, TEXT_INPUT_LABEL_MAX_LENGTH, truncate_text
+from features.text_triggers.repository import add_trigger, delete_trigger, get_guild_triggers
 
 
 # --- 新增觸發詞表單 ---
@@ -157,7 +157,9 @@ class TriggerDeleteView(discord.ui.View):
                 else:
                     description = str(description)[:50]
 
-                options.append(discord.SelectOption(label=trigger_name[:25], description=description, value=trigger_name))
+                options.append(
+                    discord.SelectOption(label=trigger_name[:25], description=description, value=trigger_name)
+                )
 
             self.add_item(TriggerDeleteSelect(guild_id, bot, options, parent_view))
 
