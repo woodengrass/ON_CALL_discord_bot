@@ -69,5 +69,8 @@ scam_image/
 # 本機規劃文件（規範、設計稿、計畫書等，不進版控）
 planning-docs/
 
+# 本機診斷報告（AI session 產出的全專案診斷紀錄，不進版控）
+DIAGNOSTIC_REPORT.md
+
 # 外掛平台子專案版控
 discord_plugin_platform/design.md
