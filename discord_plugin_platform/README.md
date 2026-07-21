@@ -23,7 +23,7 @@ Discord bot 的 Lua 外掛市集平台：外掛在資源受限的沙箱**子行�
 ## 硬性架構約束（違反會直接壞掉）
 
 1. 本子專案與主專案都有頂層 `core/` 套件 → **絕不能與主 bot 同一個 Python 行程執行**，永遠是獨立行程（獨立 bot 身分、獨立 web 應用）。
-2. SQLite 路徑 `data/plugin_platform.db` 是相對路徑：bot 行程與 web/admin 行程必須開到同一份檔案（Track J 規劃 `PLUGIN_PLATFORM_DB_PATH` 環境變數）。
+2. SQLite 預設路徑固定為平台根目錄的 `data/plugin_platform.db`，不受工作目錄影響。需要與其他平台程序共用不同位置時，設定相同的絕對 `PLUGIN_PLATFORM_DB_PATH`；相對覆寫值仍以平台根目錄解析。
 3. 跨行程狀態同步一律「寫資料庫＋對方輪詢」（停權 10 秒、規劃中的指令同步 60 秒）；`core/admin_operations.py` 不得依賴 bot 行程記憶體。
 4. 停權／封鎖採硬 cascade（直接刪安裝紀錄，不是停用旗標），下游一律全量重建狀態——新機制比照辦理。
 5. 沙箱記憶體硬限制在 Windows 開發機無法完整驗證，正式（Linux）環境才能確認。
