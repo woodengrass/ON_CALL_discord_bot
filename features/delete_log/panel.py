@@ -1,14 +1,10 @@
 ﻿import logging
-from typing import TYPE_CHECKING
 
 import discord
 
 from core.guild_settings import GuildSettings
 from core.i18n import i18n
 from core.ui_constants import PANEL_TIMEOUT_SECONDS
-
-if TYPE_CHECKING:
-    from hubs.server_setting.panel import ServerSettingView
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +14,7 @@ class DeleteLogToggleView(discord.ui.View):
     刪除訊息日誌功能的開啟/關閉切換按鈕。
     """
 
-    def __init__(self, guild_id: int, parent_view: "ServerSettingView") -> None:
+    def __init__(self, guild_id: int, parent_view: discord.ui.View) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.guild_id = guild_id
         self.parent_view = parent_view

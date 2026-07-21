@@ -232,32 +232,36 @@ class AntiFraudSelect(discord.ui.Select):
         ]
         super().__init__(placeholder=i18n.get_text("ui.placeholder", guild_id), options=options)
 
+    async def back_to_main(self, interaction: discord.Interaction) -> None:
+        """返回反詐騙主面板。"""
+        await interaction.response.edit_message(content=None, embed=None, view=AntiFraudView(self.guild_id))
+
     async def callback(self, interaction: discord.Interaction) -> None:
         selected_value = self.values[0]
         if selected_value == "honeypot":
             await interaction.response.edit_message(
                 content=i18n.get_text("messages.honeypot_menu_title", self.guild_id),
-                view=HoneypotSettingView(self.guild_id))
+                view=HoneypotSettingView(self.guild_id, self.back_to_main))
         elif selected_value == "spam":
-            view = AntiSpamToggleView(self.guild_id)
+            view = AntiSpamToggleView(self.guild_id, self.back_to_main)
             await interaction.response.edit_message(content=None, embed=view.get_embed(interaction.guild), view=view)
         elif selected_value == "whitelist":
             await interaction.response.edit_message(
                 content=i18n.get_text("messages.whitelist_menu_title", self.guild_id),
                 view=WhitelistSettingView(self.guild_id))
         elif selected_value == "link_checker":
-            view = LinkCheckerToggleView(self.guild_id)
+            view = LinkCheckerToggleView(self.guild_id, self.back_to_main)
             embed = discord.Embed(description=i18n.get_text("ui.link_checker_dashboard", self.guild_id),
                                   color=discord.Color.blue())
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         elif selected_value == "anti_raid":
-            view = AntiRaidToggleView(self.guild_id)
+            view = AntiRaidToggleView(self.guild_id, self.back_to_main)
             embed = discord.Embed(description=i18n.get_text("ui.anti_raid_dashboard", self.guild_id),
                                   color=discord.Color.blue())
             await interaction.response.edit_message(content=None, embed=embed, view=view)
         elif selected_value == "verification":
             from features.verification.panel import VerificationSettingView
-            view = VerificationSettingView(self.guild_id)
+            view = VerificationSettingView(self.guild_id, self.back_to_main)
             await interaction.response.edit_message(content=None, embed=view.get_embed(), view=view)
 
 

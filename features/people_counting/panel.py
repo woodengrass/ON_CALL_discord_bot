@@ -1,13 +1,9 @@
 import logging
-from typing import TYPE_CHECKING
 
 import discord
 
 from core.guild_settings import GuildSettings
 from core.i18n import i18n
-
-if TYPE_CHECKING:
-    from hubs.server_setting.panel import ServerSettingView
 
 logger = logging.getLogger(__name__)
 
@@ -17,7 +13,7 @@ class PeopleCountChannelSelect(discord.ui.ChannelSelect):
     人數統計頻道選擇器，選擇後立即將頻道命名為目前伺服器人數。
     """
 
-    def __init__(self, guild_id: int, parent_view: "ServerSettingView") -> None:
+    def __init__(self, guild_id: int, parent_view: discord.ui.View) -> None:
         self.guild_id = guild_id
         self.parent_view = parent_view
         super().__init__(

@@ -3,6 +3,7 @@ import discord
 from core.guild_settings import GuildSettings
 from core.i18n import i18n
 from core.ui_constants import PANEL_TIMEOUT_SECONDS
+from core.ui_navigation import BackCallback
 
 ALLOWED_CHANNEL_IDS_KEY = "allowed_channel_ids"
 
@@ -103,9 +104,10 @@ class AntiSpamToggleView(discord.ui.View):
     防洗版功能的開關儀表板，可切換偵測開關並管理允許頻道。
     """
 
-    def __init__(self, guild_id: int) -> None:
+    def __init__(self, guild_id: int, on_back: BackCallback) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.guild_id = guild_id
+        self.on_back = on_back
         self.update_buttons()
 
     def update_buttons(self) -> None:
@@ -244,11 +246,6 @@ class AntiSpamToggleView(discord.ui.View):
         back_button.callback = self.back_to_main
         self.add_item(back_button)
 
-    def _main_view(self) -> discord.ui.View:
-        from hubs.anti_fraud.panel import AntiFraudView
-
-        return AntiFraudView(self.guild_id)
-
     async def manage_allowed_channels(self, interaction: discord.Interaction) -> None:
         """
         開啟防洗版允許頻道管理面板。
@@ -260,4 +257,4 @@ class AntiSpamToggleView(discord.ui.View):
         )
 
     async def back_to_main(self, interaction: discord.Interaction) -> None:
-        await interaction.response.edit_message(content=None, embed=None, view=self._main_view())
+        await self.on_back(interaction)
