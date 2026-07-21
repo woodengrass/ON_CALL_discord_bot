@@ -25,6 +25,8 @@
     "risk_threshold": 2
   },
   "link_checker": {
-    "image_scam_timeout_hours": 240
+    "image_scam_timeout_hours": 240,
+    "image_max_file_bytes": 20971520,
+    "image_max_pixels": 40000000
   }
 }

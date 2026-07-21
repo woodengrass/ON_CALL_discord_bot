@@ -1,10 +1,11 @@
 ﻿import asyncio
 import datetime
-import io
 import logging
 import os
 import re
+import tempfile
 import time
+import warnings
 from urllib.parse import urljoin, urlparse
 
 import aiohttp
@@ -32,10 +33,19 @@ REDIRECT_STATUS_CODES = {301, 302, 303, 307, 308}
 
 IMAGE_FILE_EXTENSIONS = (".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp")
 SCAM_IMAGE_HAMMING_THRESHOLD = 8  # 感知雜湊漢明距離門檻，數值越小代表要求越接近原圖
+IMAGE_DOWNLOAD_CHUNK_SIZE_BYTES = 64 * 1024
 
 link_checker_config = CONFIG.get("link_checker", {})
 IMAGE_SCAM_TIMEOUT_HOURS = link_checker_config.get("image_scam_timeout_hours", 240)
 IMAGE_SCAM_TIMEOUT_DURATION = datetime.timedelta(hours=IMAGE_SCAM_TIMEOUT_HOURS)
+IMAGE_MAX_FILE_BYTES = link_checker_config.get("image_max_file_bytes", 20 * 1024 * 1024)
+IMAGE_MAX_PIXELS = link_checker_config.get("image_max_pixels", 40_000_000)
+# Pillow 在讀取圖片標頭時即套用像素硬上限，避免進入完整解碼流程。
+Image.MAX_IMAGE_PIXELS = IMAGE_MAX_PIXELS
+
+
+class ImageFileTooLargeError(ValueError):
+    """圖片附件超過設定大小限制。"""
 
 
 class LinkChecker(commands.Cog):
@@ -58,6 +68,8 @@ class LinkChecker(commands.Cog):
         self.session: aiohttp.ClientSession | None = None
         self.suspicious_keywords: list[str] = []
         self.scam_hashes: list[tuple[str, str]] = []
+        self.max_image_bytes = IMAGE_MAX_FILE_BYTES
+        self.max_image_pixels = IMAGE_MAX_PIXELS
 
         self.clean_cache_task.start()
 
@@ -277,13 +289,41 @@ class LinkChecker(commands.Cog):
             return True
         return attachment.filename.lower().endswith(IMAGE_FILE_EXTENSIONS)
 
-    def _process_image(self, image_bytes: bytes, check_qr: bool, check_hash: bool) -> tuple[list[str], str | None]:
+    async def _download_image_attachment(self, attachment: discord.Attachment, temp_filename: str) -> None:
+        """
+        以固定大小區塊將圖片附件串流寫入暫存檔，並在下載途中再次檢查總大小。
+
+        Args:
+            attachment: 要下載的 Discord 圖片附件
+            temp_filename: 暫存檔完整路徑
+
+        Raises:
+            ImageFileTooLargeError: 附件大小超過設定上限
+            RuntimeError: HTTP session 尚未初始化或下載回應失敗
+        """
+        if attachment.size > self.max_image_bytes:
+            raise ImageFileTooLargeError
+        if self.session is None:
+            raise RuntimeError("HTTP session 尚未初始化")
+
+        downloaded_bytes = 0
+        async with self.session.get(attachment.url) as response:
+            if response.status != 200:
+                raise RuntimeError(f"下載圖片附件失敗，狀態碼：{response.status}")
+            with open(temp_filename, "wb") as temp_file:
+                async for chunk in response.content.iter_chunked(IMAGE_DOWNLOAD_CHUNK_SIZE_BYTES):
+                    downloaded_bytes += len(chunk)
+                    if downloaded_bytes > self.max_image_bytes:
+                        raise ImageFileTooLargeError
+                    temp_file.write(chunk)
+
+    def _process_image(self, image_filename: str, check_qr: bool, check_hash: bool) -> tuple[list[str], str | None]:
         """
         同步處理單張圖片：解碼 QR code 取得網址、計算感知雜湊並比對已知詐騙圖片。
         內含 CPU-bound 運算（QR 解碼、雜湊計算），呼叫端應以 asyncio.to_thread 執行，避免阻塞事件迴圈。
 
         Args:
-            image_bytes: 圖片原始位元組
+            image_filename: 圖片暫存檔完整路徑
             check_qr: 是否解碼 QR code
             check_hash: 是否比對詐騙圖片感知雜湊
 
@@ -297,30 +337,37 @@ class LinkChecker(commands.Cog):
             return qr_urls, matched_label
 
         try:
-            image = Image.open(io.BytesIO(image_bytes))
-        except Exception:
-            return qr_urls, matched_label
+            with warnings.catch_warnings():
+                warnings.simplefilter("error", Image.DecompressionBombWarning)
+                with Image.open(image_filename) as image:
+                    if image.width * image.height > self.max_image_pixels:
+                        logger.warning("圖片像素超過上限：%s", image_filename)
+                        return qr_urls, matched_label
 
-        if check_qr:
-            try:
-                for qr_code in decode_qr_codes(image):
-                    try:
-                        qr_urls.append(qr_code.data.decode("utf-8"))
-                    except UnicodeDecodeError:
-                        continue
-            except Exception as error:
-                logger.error(f"QR code 解碼失敗：{error}", exc_info=True)
+                    if check_qr:
+                        try:
+                            for qr_code in decode_qr_codes(image):
+                                try:
+                                    qr_urls.append(qr_code.data.decode("utf-8"))
+                                except UnicodeDecodeError:
+                                    continue
+                        except Exception as error:
+                            logger.error(f"QR code 解碼失敗：{error}", exc_info=True)
 
-        if check_hash:
-            try:
-                current_hash = imagehash.phash(image)
-                for scam_hash_hex, label in self.scam_hashes:
-                    scam_hash = imagehash.hex_to_hash(scam_hash_hex)
-                    if current_hash - scam_hash <= SCAM_IMAGE_HAMMING_THRESHOLD:
-                        matched_label = label
-                        break
-            except Exception as error:
-                logger.error(f"圖片感知雜湊比對失敗：{error}", exc_info=True)
+                    if check_hash:
+                        try:
+                            current_hash = imagehash.phash(image)
+                            for scam_hash_hex, label in self.scam_hashes:
+                                scam_hash = imagehash.hex_to_hash(scam_hash_hex)
+                                if current_hash - scam_hash <= SCAM_IMAGE_HAMMING_THRESHOLD:
+                                    matched_label = label
+                                    break
+                        except Exception as error:
+                            logger.error(f"圖片感知雜湊比對失敗：{error}", exc_info=True)
+        except (Image.DecompressionBombWarning, Image.DecompressionBombError):
+            logger.warning("拒絕像素超過上限的圖片：%s", image_filename)
+        except Exception as error:
+            logger.error(f"開啟圖片附件失敗：{error}", exc_info=True)
 
         return qr_urls, matched_label
 
@@ -349,18 +396,28 @@ class LinkChecker(commands.Cog):
             for attachment in message.attachments:
                 if not self._is_image_attachment(attachment):
                     continue
+                temp_filename = None
                 try:
-                    image_bytes = await attachment.read()
-                except Exception as e:
-                    logger.error(f"下載附件圖片失敗：{e}", exc_info=True)
-                    continue
-
-                qr_urls, matched_label = await asyncio.to_thread(
-                    self._process_image, image_bytes, check_qr, check_hash
-                )
-                urls.extend(qr_urls)
-                if matched_label and image_scam_label is None:
-                    image_scam_label = matched_label
+                    suffix = os.path.splitext(attachment.filename)[1]
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+                        temp_filename = temp_file.name
+                    await self._download_image_attachment(attachment, temp_filename)
+                    qr_urls, matched_label = await asyncio.to_thread(
+                        self._process_image, temp_filename, check_qr, check_hash
+                    )
+                    urls.extend(qr_urls)
+                    if matched_label and image_scam_label is None:
+                        image_scam_label = matched_label
+                except ImageFileTooLargeError:
+                    logger.warning("略過超過大小上限的圖片附件：%s", attachment.filename)
+                except Exception as error:
+                    logger.error(f"下載或處理附件圖片失敗：{error}", exc_info=True)
+                finally:
+                    if temp_filename and os.path.exists(temp_filename):
+                        try:
+                            os.remove(temp_filename)
+                        except Exception as error:
+                            logger.error(f"刪除圖片暫存檔案失敗：{error}", exc_info=True)
 
         if not urls and not image_scam_label:
             return
