@@ -119,6 +119,19 @@ class LinkChecker(commands.Cog):
         config = GuildSettings.get_module_config(guild_id, "link_checker")
         return config.get("enabled", False)
 
+    def is_whitelisted(self, user_id: int, guild_id: int) -> bool:
+        """
+        檢查使用者是否在伺服器共用白名單中。
+
+        Args:
+            user_id: 使用者 ID
+            guild_id: 伺服器 ID
+
+        Returns:
+            True 表示使用者在白名單中
+        """
+        return str(user_id) in GuildSettings.get_whitelist(guild_id)
+
     def is_qr_code_check_enabled(self, guild_id: int) -> bool:
         """
         檢查指定伺服器是否已啟用 QR code 網址檢查子功能。
@@ -337,6 +350,9 @@ class LinkChecker(commands.Cog):
             return
 
         if not self.is_module_enabled(message.guild.id):
+            return
+
+        if self.is_whitelisted(message.author.id, message.guild.id):
             return
 
         check_qr = self.is_qr_code_check_enabled(message.guild.id)

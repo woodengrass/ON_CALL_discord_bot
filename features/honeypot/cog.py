@@ -84,9 +84,7 @@ class HoneypotMonitor(commands.Cog):
         honeypot_id = int(honeypot_id_str)
 
         announcement_id = GuildSettings.get_log_channel(guild_id)
-        whitelist = GuildSettings.get_whitelist(guild_id)
-
-        if str(message.author.id) in whitelist or message.author == message.guild.owner:
+        if str(message.author.id) in GuildSettings.get_whitelist(guild_id):
             return
 
         bot_member = message.guild.me
