@@ -60,3 +60,15 @@ async def test_reset_review_creation_returns_entry_to_pending(
 
     entry = await repository.get_entry(100, 200)
     assert entry == {"risk_score": 3, "status": "pending", "review_channel_id": None}
+
+
+@pytest.mark.asyncio
+async def test_create_pending_does_not_overwrite_review_creation(database: aiosqlite.Connection) -> None:
+    """補救流程的並行點擊不得把已取得的審核建立權重設為 pending。"""
+    await repository.set_pending(100, 200, 3)
+    assert await repository.claim_review_creation(100, 200) is True
+
+    assert await repository.create_pending(100, 200, 1) is False
+
+    entry = await repository.get_entry(100, 200)
+    assert entry == {"risk_score": 3, "status": "review_creating", "review_channel_id": None}

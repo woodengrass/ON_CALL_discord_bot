@@ -12,6 +12,7 @@ from core.i18n import i18n
 from features.verification.repository import (
     claim_review_creation,
     complete_review_creation,
+    create_pending,
     delete_entry,
     delete_guild_entries,
     get_entry,
@@ -245,10 +246,63 @@ class Verification(commands.Cog):
 
         entry = await get_entry(guild_id, user_id)
         if entry is None:
-            await interaction.response.send_message(
-                i18n.get_text("messages.verify_no_entry_found", guild_id), ephemeral=True
-            )
-            return
+            config = self.get_config(guild_id)
+            if not config.get("enabled", False):
+                await interaction.response.send_message(
+                    i18n.get_text("messages.verify_no_entry_found", guild_id), ephemeral=True
+                )
+                return
+
+            verified_role_id = config.get("verified_role_id")
+            verified_role = interaction.guild.get_role(int(verified_role_id)) if verified_role_id else None
+            if verified_role is None:
+                logger.error("驗證系統設定的已驗證身分組不存在：伺服器 ID=%s", guild_id)
+                await interaction.response.send_message(
+                    i18n.get_text("messages.verify_role_error", guild_id), ephemeral=True
+                )
+                return
+            if verified_role in interaction.user.roles:
+                await interaction.response.send_message(
+                    i18n.get_text("messages.verify_already_approved", guild_id), ephemeral=True
+                )
+                return
+
+            restricted_role_id = config.get("restricted_role_id")
+            restricted_role = interaction.guild.get_role(int(restricted_role_id)) if restricted_role_id else None
+            if restricted_role is None:
+                logger.error("驗證系統設定的待驗證身分組不存在：伺服器 ID=%s", guild_id)
+                await interaction.response.send_message(
+                    i18n.get_text("messages.verify_role_error", guild_id), ephemeral=True
+                )
+                return
+
+            try:
+                if restricted_role not in interaction.user.roles:
+                    pending_reason = i18n.get_text("messages.verification_reason_pending", guild_id)
+                    await interaction.user.add_roles(restricted_role, reason=pending_reason)
+            except Exception as error:
+                logger.error(f"補發待驗證身分組失敗：{error}", exc_info=True)
+                await interaction.response.send_message(
+                    i18n.get_text("messages.verify_role_error", guild_id), ephemeral=True
+                )
+                return
+
+            try:
+                new_account_days = config.get("new_account_days", DEFAULT_NEW_ACCOUNT_DAYS)
+                risk_score = calculate_risk_score(interaction.user, new_account_days)
+                created_pending = await create_pending(guild_id, user_id, risk_score)
+                if created_pending:
+                    entry = {"risk_score": risk_score, "status": "pending", "review_channel_id": None}
+                else:
+                    entry = await get_entry(guild_id, user_id)
+                    if entry is None:
+                        raise RuntimeError("驗證紀錄建立後仍找不到資料")
+            except Exception as error:
+                logger.error(f"補建待驗證紀錄失敗：{error}", exc_info=True)
+                await interaction.response.send_message(
+                    i18n.get_text("messages.error_unknown", guild_id), ephemeral=True
+                )
+                return
 
         if entry["status"] == "approved":
             await interaction.response.send_message(
