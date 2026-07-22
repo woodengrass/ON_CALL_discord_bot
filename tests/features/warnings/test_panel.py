@@ -312,13 +312,16 @@ def test_warning_page_state_clamps_page(
 
 
 @pytest.mark.asyncio
-async def test_toggle_missing_warning_acknowledges_interaction(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_toggle_missing_warning_acknowledges_interaction(
+    monkeypatch: pytest.MonkeyPatch,
+    draft_store: WarningDraftStore,
+) -> None:
     """選取後提醒遭刪除時，toggle callback 仍應回覆操作失敗。"""
     monkeypatch.setattr(panel.WarningStore, "data", {"warning-1": {"guild_id": 100}})
     toggle_warning = AsyncMock(return_value=None)
     monkeypatch.setattr(panel.WarningStore, "toggle_warning", toggle_warning)
     parent_view = MagicMock(page=0)
-    warning_select = panel.WarningListSelect(100, "toggle", parent_view, 0)
+    warning_select = panel.WarningListSelect(100, "toggle", parent_view, 0, draft_store)
     warning_select._values = ["warning-1"]
     interaction = _make_interaction(100, 200)
 
