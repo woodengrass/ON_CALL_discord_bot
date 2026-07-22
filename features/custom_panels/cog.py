@@ -14,6 +14,23 @@ from features.custom_panels.repository import CustomPanelStore
 logger = logging.getLogger(__name__)
 
 
+async def _resolve_guild_channel(guild: discord.Guild, channel_id: int) -> discord.abc.GuildChannel | None:
+    """
+    優先從 guild 快取取得頻道，找不到時向 Discord API 查詢。
+
+    Args:
+        guild: 頻道所屬伺服器
+        channel_id: 欲取得的頻道 ID
+
+    Returns:
+        找到的 guild 頻道；頻道不存在時回傳 None
+    """
+    channel = guild.get_channel(channel_id)
+    if channel is not None:
+        return channel
+    return await guild.fetch_channel(channel_id)
+
+
 # ==============================================================================
 #  組件 1: 審核控制按鈕 (View)
 # ==============================================================================
@@ -304,15 +321,18 @@ class CustomPanelSystem(commands.Cog):
                 await interaction.followup.send(error_message, ephemeral=True)
                 return
 
-            log_channel = interaction.guild.get_channel(log_channel_id)
-            if not log_channel:
-                try:
-                    log_channel = await interaction.guild.fetch_channel(log_channel_id)
-                except Exception as e:
-                    logger.error(f"取得紀錄頻道失敗：{e}", exc_info=True)
-                    error_message = i18n.get_text("messages.error_log_channel_not_found", guild_id)
-                    await interaction.followup.send(error_message, ephemeral=True)
-                    return
+            try:
+                log_channel = await _resolve_guild_channel(interaction.guild, log_channel_id)
+            except Exception as e:
+                logger.error(f"取得紀錄頻道失敗：{e}", exc_info=True)
+                error_message = i18n.get_text("messages.error_log_channel_not_found", guild_id)
+                await interaction.followup.send(error_message, ephemeral=True)
+                return
+
+            if log_channel is None:
+                error_message = i18n.get_text("messages.error_log_channel_not_found", guild_id)
+                await interaction.followup.send(error_message, ephemeral=True)
+                return
 
             # 使用 Discord Timestamp (<t:timestamp:f>)，這會自動轉換為使用者的當地時間，而不是伺服器時間
             timestamp_code = f"<t:{int(datetime.datetime.now().timestamp())}:f>"
@@ -543,12 +563,11 @@ class CustomPanelSystem(commands.Cog):
         sent_dm = False
 
         if notify_channel_id > 0:
-            notify_channel = guild.get_channel(notify_channel_id)
-            if not notify_channel:
-                try:
-                    notify_channel = await guild.fetch_channel(notify_channel_id)
-                except Exception as e:
-                    logger.error(f"取得通知頻道失敗：{e}", exc_info=True)
+            try:
+                notify_channel = await _resolve_guild_channel(guild, notify_channel_id)
+            except Exception as e:
+                logger.error(f"取得通知頻道失敗：{e}", exc_info=True)
+                notify_channel = None
 
             if notify_channel:
                 try:
