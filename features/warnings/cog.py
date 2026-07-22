@@ -7,8 +7,9 @@ from discord import app_commands
 from discord.app_commands import locale_str
 from discord.ext import commands, tasks
 
-from features.warnings.panel import WarningSettingView, cleanup_stale_wip_warnings
+from features.warnings.panel import WarningSettingView
 from features.warnings.repository import WarningStore
+from features.warnings.wizard_state import WarningDraftStore
 
 logger = logging.getLogger(__name__)
 
@@ -21,15 +22,17 @@ class WarningTask(commands.Cog):
     每分鐘檢查一次是否有符合排程時間的定時提醒，並依設定發送提醒訊息。
     """
 
-    def __init__(self, bot: commands.Bot) -> None:
+    def __init__(self, bot: commands.Bot, draft_store: WarningDraftStore) -> None:
         self.bot = bot
+        self.draft_store = draft_store
         self.check_warning_task.start()
 
     def cog_unload(self) -> None:
         """
-        卸載 Cog 時停止定時提醒檢查任務。
+        卸載 Cog 時停止定時提醒檢查任務並清除未完成草稿。
         """
         self.check_warning_task.cancel()
+        self.draft_store.clear()
 
     @tasks.loop(minutes=1)
     async def check_warning_task(self) -> None:
@@ -40,9 +43,6 @@ class WarningTask(commands.Cog):
         current_time = now.strftime("%H:%M")  # 例如 "22:00"
         current_weekday = now.isoweekday()  # 1(一) ~ 7(日)
         current_day = now.day  # 1 ~ 31 號
-
-        # 順便清除已放棄的提醒設定精靈暫存資料
-        cleanup_stale_wip_warnings()
 
         all_warning_data = WarningStore.data
         if not all_warning_data:
@@ -141,15 +141,19 @@ class WarningTask(commands.Cog):
 class WarningCommands(commands.Cog):
     """提供定時提醒設定入口。"""
 
+    def __init__(self, draft_store: WarningDraftStore) -> None:
+        self.draft_store = draft_store
+
     @app_commands.checks.has_permissions(administrator=True)
     @app_commands.command(name="warning_setting", description=locale_str("warning_setting"))
     async def warning_setting(self, interaction: discord.Interaction) -> None:
         """顯示定時提醒設定面板。"""
-        view = WarningSettingView(interaction.guild.id)
+        view = WarningSettingView(interaction.guild.id, self.draft_store)
         await interaction.response.send_message(embed=view.get_embed(), view=view, ephemeral=True)
 
 
 async def setup(bot: commands.Bot) -> None:
-    await bot.add_cog(WarningTask(bot))
-    await bot.add_cog(WarningCommands())
+    draft_store = WarningDraftStore()
+    await bot.add_cog(WarningTask(bot, draft_store))
+    await bot.add_cog(WarningCommands(draft_store))
 

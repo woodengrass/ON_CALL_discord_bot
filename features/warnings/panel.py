@@ -1,5 +1,4 @@
 ﻿import re
-import time
 import uuid
 
 import discord
@@ -7,25 +6,7 @@ import discord
 from core.i18n import i18n
 from core.ui_constants import MAX_SELECT_OPTIONS, PANEL_TIMEOUT_SECONDS, WARNING_PAGE_SIZE
 from features.warnings.repository import WarningStore
-
-WarningSessionKey = tuple[int, int, str]
-
-# 全域字典，依伺服器、使用者及流程 nonce 暫存正在編輯的表單狀態
-WIP_WARNINGS: dict[WarningSessionKey, dict] = {}
-WIP_WARNING_TIMEOUT_SECONDS = 1800  # 超過 30 分鐘未完成設定精靈則視為放棄
-
-
-def cleanup_stale_wip_warnings() -> None:
-    """
-    清除超過逾時時間仍未完成設定精靈的暫存資料，避免使用者中途放棄造成記憶體洩漏。
-    """
-    now = time.time()
-    expired_session_keys = [
-        session_key for session_key, wip_data in WIP_WARNINGS.items()
-        if now - wip_data.get("_created_at", now) > WIP_WARNING_TIMEOUT_SECONDS
-    ]
-    for session_key in expired_session_keys:
-        del WIP_WARNINGS[session_key]
+from features.warnings.wizard_state import WarningDraftStore, WarningPageState, WarningSessionKey
 
 
 def _create_warning_session_key(guild_id: int, user_id: int) -> WarningSessionKey:
@@ -45,6 +26,7 @@ def _create_warning_session_key(guild_id: int, user_id: int) -> WarningSessionKe
 async def _get_wip_warning(
     interaction: discord.Interaction,
     session_key: WarningSessionKey,
+    draft_store: WarningDraftStore,
 ) -> dict | None:
     """
     驗證互動身分並取得指定設定流程的暫存資料。
@@ -57,15 +39,17 @@ async def _get_wip_warning(
         驗證成功時回傳暫存資料，否則回傳 None 並回覆錯誤訊息
     """
     guild_id, user_id, _ = session_key
-    if (
-        interaction.guild_id != guild_id
-        or interaction.user.id != user_id
-        or session_key not in WIP_WARNINGS
-    ):
+    if interaction.guild_id != guild_id or interaction.user.id != user_id:
         error_message = i18n.get_text("messages.error_wip_not_found", guild_id)
         await interaction.response.send_message(error_message, ephemeral=True)
         return None
-    return WIP_WARNINGS[session_key]
+
+    wip_data = draft_store.get(session_key)
+    if wip_data is None:
+        error_message = i18n.get_text("messages.error_wip_not_found", guild_id)
+        await interaction.response.send_message(error_message, ephemeral=True)
+        return None
+    return wip_data
 
 
 def _parse_schedule_time(value: str) -> str | None:
@@ -144,6 +128,7 @@ class WarningTimeModal(discord.ui.Modal):
         user_id: int,
         session_key: WarningSessionKey,
         parent_view: "WarningSettingView",
+        draft_store: WarningDraftStore,
     ) -> None:
         super().__init__(title=i18n.get_text("ui.modal_time_title", guild_id)[:45])
         self.guild_id = guild_id
@@ -151,9 +136,10 @@ class WarningTimeModal(discord.ui.Modal):
         self.user_id = user_id
         self.session_key = session_key
         self.parent_view = parent_view  # 最原始的 WarningSettingView
+        self.draft_store = draft_store
 
         # 預設值讀取 (如果是編輯模式)
-        wip_data = WIP_WARNINGS.get(session_key, {})
+        wip_data = draft_store.get(session_key) or {}
         schedule_config = wip_data.get("schedule", {})
 
         self.time_input = discord.ui.TextInput(
@@ -176,7 +162,7 @@ class WarningTimeModal(discord.ui.Modal):
             self.add_item(self.days_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        wip_data = await _get_wip_warning(interaction, self.session_key)
+        wip_data = await _get_wip_warning(interaction, self.session_key, self.draft_store)
         if wip_data is None:
             return
 
@@ -218,10 +204,10 @@ class WarningTimeModal(discord.ui.Modal):
         )
 
         # 清除暫存
-        WIP_WARNINGS.pop(self.session_key, None)
+        self.draft_store.discard(self.session_key)
 
         # 刷新主面板
-        updated_view = WarningSettingView(self.guild_id, self.parent_view.page)
+        updated_view = WarningSettingView(self.guild_id, self.draft_store, self.parent_view.page)
         await interaction.response.edit_message(content=None, embed=updated_view.get_embed(), view=updated_view)
         await interaction.followup.send(i18n.get_text("messages.warning_success_saved", self.guild_id), ephemeral=True)
 
@@ -237,12 +223,14 @@ class WarningScheduleView(discord.ui.View):
         user_id: int,
         session_key: WarningSessionKey,
         parent_view: "WarningSettingView",
+        draft_store: WarningDraftStore,
     ) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.guild_id = guild_id
         self.user_id = user_id
         self.session_key = session_key
         self.parent_view = parent_view
+        self.draft_store = draft_store
 
         options = [
             discord.SelectOption(label=i18n.get_text("ui.freq_daily", guild_id), value="daily"),
@@ -264,9 +252,10 @@ class WarningScheduleView(discord.ui.View):
         self.add_item(cancel_button)
 
     async def frequency_callback(self, interaction: discord.Interaction) -> None:
-        if await _get_wip_warning(interaction, self.session_key) is None:
+        if await _get_wip_warning(interaction, self.session_key, self.draft_store) is None:
             return
         frequency_type = interaction.data["values"][0]
+        self.stop()
         await interaction.response.send_modal(
             WarningTimeModal(
                 self.guild_id,
@@ -274,25 +263,34 @@ class WarningScheduleView(discord.ui.View):
                 self.user_id,
                 self.session_key,
                 self.parent_view,
+                self.draft_store,
             )
         )
 
     async def back_callback(self, interaction: discord.Interaction) -> None:
-        if await _get_wip_warning(interaction, self.session_key) is None:
+        if await _get_wip_warning(interaction, self.session_key, self.draft_store) is None:
             return
+        self.stop()
         await interaction.response.edit_message(
             content=i18n.get_text("ui.warning_target", self.guild_id),
             embed=None,
-            view=WarningTargetView(self.guild_id, self.user_id, self.session_key, self.parent_view),
+            view=WarningTargetView(
+                self.guild_id, self.user_id, self.session_key, self.parent_view, self.draft_store
+            ),
         )
 
     async def cancel_callback(self, interaction: discord.Interaction) -> None:
-        if await _get_wip_warning(interaction, self.session_key) is None:
+        if await _get_wip_warning(interaction, self.session_key, self.draft_store) is None:
             return
-        WIP_WARNINGS.pop(self.session_key, None)
+        self.draft_store.discard(self.session_key)
+        self.stop()
         await interaction.response.edit_message(
             content=None, embed=self.parent_view.get_embed(), view=self.parent_view
         )
+
+    async def on_timeout(self) -> None:
+        """在目前排程步驟逾時時丟棄未完成草稿。"""
+        self.draft_store.discard(self.session_key)
 
 
 # ==============================================================================
@@ -309,12 +307,14 @@ class WarningTargetView(discord.ui.View):
         user_id: int,
         session_key: WarningSessionKey,
         parent_view: "WarningSettingView",
+        draft_store: WarningDraftStore,
     ) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.guild_id = guild_id
         self.user_id = user_id
         self.session_key = session_key
         self.parent_view = parent_view
+        self.draft_store = draft_store
 
         # 頻道選擇
         channel_select = discord.ui.ChannelSelect(
@@ -349,14 +349,14 @@ class WarningTargetView(discord.ui.View):
         self.add_item(cancel_button)
 
     async def channel_callback(self, interaction: discord.Interaction) -> None:
-        wip_data = await _get_wip_warning(interaction, self.session_key)
+        wip_data = await _get_wip_warning(interaction, self.session_key, self.draft_store)
         if wip_data is None:
             return
         wip_data["channel_id"] = interaction.data["values"][0]
         await interaction.response.defer()
 
     async def role_callback(self, interaction: discord.Interaction) -> None:
-        wip_data = await _get_wip_warning(interaction, self.session_key)
+        wip_data = await _get_wip_warning(interaction, self.session_key, self.draft_store)
         if wip_data is None:
             return
         if interaction.data["values"]:
@@ -364,7 +364,7 @@ class WarningTargetView(discord.ui.View):
         await interaction.response.defer()
 
     async def next_callback(self, interaction: discord.Interaction) -> None:
-        wip_data = await _get_wip_warning(interaction, self.session_key)
+        wip_data = await _get_wip_warning(interaction, self.session_key, self.draft_store)
         if wip_data is None:
             return
         if "channel_id" not in wip_data or not wip_data["channel_id"]:
@@ -372,30 +372,40 @@ class WarningTargetView(discord.ui.View):
             await interaction.response.send_message(error_message, ephemeral=True)
             return
 
-        view = WarningScheduleView(self.guild_id, self.user_id, self.session_key, self.parent_view)
+        self.stop()
+        view = WarningScheduleView(
+            self.guild_id, self.user_id, self.session_key, self.parent_view, self.draft_store
+        )
         schedule_prompt = i18n.get_text("ui.warning_schedule", self.guild_id)
         await interaction.response.edit_message(content=schedule_prompt, view=view)
 
     async def back_callback(self, interaction: discord.Interaction) -> None:
-        if await _get_wip_warning(interaction, self.session_key) is None:
+        if await _get_wip_warning(interaction, self.session_key, self.draft_store) is None:
             return
+        self.stop()
         await interaction.response.send_modal(
             WarningContentModal(
                 self.guild_id,
                 self.user_id,
                 self.session_key,
                 self.parent_view,
+                self.draft_store,
                 preserve_existing=True,
             )
         )
 
     async def cancel_callback(self, interaction: discord.Interaction) -> None:
-        if await _get_wip_warning(interaction, self.session_key) is None:
+        if await _get_wip_warning(interaction, self.session_key, self.draft_store) is None:
             return
-        WIP_WARNINGS.pop(self.session_key, None)
+        self.draft_store.discard(self.session_key)
+        self.stop()
         await interaction.response.edit_message(
             content=None, embed=self.parent_view.get_embed(), view=self.parent_view
         )
+
+    async def on_timeout(self) -> None:
+        """在目前目標設定步驟逾時時丟棄未完成草稿。"""
+        self.draft_store.discard(self.session_key)
 
 
 # ==============================================================================
@@ -412,6 +422,7 @@ class WarningContentModal(discord.ui.Modal):
         user_id: int,
         session_key: WarningSessionKey,
         parent_view: "WarningSettingView",
+        draft_store: WarningDraftStore,
         edit_id: str | None = None,
         preserve_existing: bool = False,
     ) -> None:
@@ -420,16 +431,18 @@ class WarningContentModal(discord.ui.Modal):
         self.user_id = user_id
         self.session_key = session_key
         self.parent_view = parent_view
+        self.draft_store = draft_store
 
         # 初始化暫存
         if not preserve_existing:
-            WIP_WARNINGS[session_key] = {}
+            initial_data: dict | None = None
             if edit_id:
-                WIP_WARNINGS[session_key] = dict(WarningStore.data.get(edit_id, {}))
-                WIP_WARNINGS[session_key]["id"] = edit_id
-        WIP_WARNINGS[session_key]["_created_at"] = time.time()
+                initial_data = WarningStore.data.get(edit_id, {})
+            wip_data = self.draft_store.create(session_key, initial_data)
+            if edit_id:
+                wip_data["id"] = edit_id
 
-        wip_content = WIP_WARNINGS[session_key].get("content", {})
+        wip_content = (self.draft_store.get(session_key) or {}).get("content", {})
 
         self.title_input = discord.ui.TextInput(
             label=i18n.get_text("ui.input_warning_title", guild_id)[:45],
@@ -462,7 +475,7 @@ class WarningContentModal(discord.ui.Modal):
         self.add_item(self.image_input)
 
     async def on_submit(self, interaction: discord.Interaction) -> None:
-        wip_data = await _get_wip_warning(interaction, self.session_key)
+        wip_data = await _get_wip_warning(interaction, self.session_key, self.draft_store)
         if wip_data is None:
             return
         wip_data["content"] = {
@@ -473,7 +486,10 @@ class WarningContentModal(discord.ui.Modal):
             "image": self.image_input.value.strip()
         }
 
-        view = WarningTargetView(self.guild_id, self.user_id, self.session_key, self.parent_view)
+        view = WarningTargetView(
+            self.guild_id, self.user_id, self.session_key, self.parent_view, self.draft_store
+        )
+        self.stop()
         target_prompt = i18n.get_text("ui.warning_target", self.guild_id)
         await interaction.response.edit_message(content=target_prompt, embed=None, view=view)
 
@@ -484,10 +500,18 @@ class WarningContentModal(discord.ui.Modal):
 class WarningListSelect(discord.ui.Select):
     """用於列出單頁提醒供編輯、刪除或切換狀態。"""
 
-    def __init__(self, guild_id: int, action: str, parent_view: "WarningSettingView", page: int) -> None:
+    def __init__(
+        self,
+        guild_id: int,
+        action: str,
+        parent_view: "WarningSettingView",
+        page: int,
+        draft_store: WarningDraftStore,
+    ) -> None:
         self.guild_id = guild_id
         self.action = action
         self.parent_view = parent_view
+        self.draft_store = draft_store
 
         warning_items = list(get_warnings(guild_id).items())
         page_start = page * MAX_SELECT_OPTIONS
@@ -519,13 +543,14 @@ class WarningListSelect(discord.ui.Select):
                     interaction.user.id,
                     session_key,
                     self.parent_view,
+                    self.draft_store,
                     warning_id,
                 )
             )
 
         elif self.action == "delete":
             await WarningStore.remove_warning(warning_id)
-            updated_view = WarningSettingView(self.guild_id, self.parent_view.page)
+            updated_view = WarningSettingView(self.guild_id, self.draft_store, self.parent_view.page)
             await interaction.response.edit_message(content=None, embed=updated_view.get_embed(), view=updated_view)
             await interaction.followup.send(i18n.get_text("messages.warning_success_deleted", self.guild_id),
                                             ephemeral=True)
@@ -539,7 +564,7 @@ class WarningListSelect(discord.ui.Select):
             )
             toggled_message = i18n.get_text("messages.warning_success_toggled", self.guild_id, status=status_text)
 
-            updated_view = WarningSettingView(self.guild_id, self.parent_view.page)
+            updated_view = WarningSettingView(self.guild_id, self.draft_store, self.parent_view.page)
             await interaction.response.edit_message(content=None, embed=updated_view.get_embed(), view=updated_view)
             await interaction.followup.send(toggled_message, ephemeral=True)
 
@@ -549,23 +574,31 @@ class WarningSelectionView(discord.ui.View):
     顯示提醒操作目標的分頁選單。
     """
 
-    def __init__(self, guild_id: int, action: str, parent_view: "WarningSettingView", page: int = 0) -> None:
+    def __init__(
+        self,
+        guild_id: int,
+        action: str,
+        parent_view: "WarningSettingView",
+        draft_store: WarningDraftStore,
+        page: int = 0,
+    ) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.guild_id = guild_id
         self.action = action
         self.parent_view = parent_view
-        warning_count = len(get_warnings(guild_id))
-        self.total_pages = max(1, (warning_count + MAX_SELECT_OPTIONS - 1) // MAX_SELECT_OPTIONS)
-        self.page = min(max(page, 0), self.total_pages - 1)
-        self.add_item(WarningListSelect(guild_id, action, parent_view, self.page))
+        self.draft_store = draft_store
+        page_state = WarningPageState(len(get_warnings(guild_id)), MAX_SELECT_OPTIONS, page)
+        self.total_pages = page_state.total_pages
+        self.page = page_state.page
+        self.add_item(WarningListSelect(guild_id, action, parent_view, self.page, draft_store))
 
-        if self.page > 0:
+        if page_state.has_previous:
             previous_button = discord.ui.Button(
                 label=i18n.get_text("ui.previous_page", guild_id), style=discord.ButtonStyle.secondary
             )
             previous_button.callback = self.previous_page
             self.add_item(previous_button)
-        if self.page < self.total_pages - 1:
+        if page_state.has_next:
             next_button = discord.ui.Button(
                 label=i18n.get_text("ui.next_page", guild_id), style=discord.ButtonStyle.secondary
             )
@@ -580,12 +613,16 @@ class WarningSelectionView(discord.ui.View):
 
     async def previous_page(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(
-            view=WarningSelectionView(self.guild_id, self.action, self.parent_view, self.page - 1)
+            view=WarningSelectionView(
+                self.guild_id, self.action, self.parent_view, self.draft_store, self.page - 1
+            )
         )
 
     async def next_page(self, interaction: discord.Interaction) -> None:
         await interaction.response.edit_message(
-            view=WarningSelectionView(self.guild_id, self.action, self.parent_view, self.page + 1)
+            view=WarningSelectionView(
+                self.guild_id, self.action, self.parent_view, self.draft_store, self.page + 1
+            )
         )
 
     async def back_to_main(self, interaction: discord.Interaction) -> None:
@@ -597,9 +634,12 @@ class WarningSelectionView(discord.ui.View):
 class WarningActionSelect(discord.ui.Select):
     """主面板的一級菜單"""
 
-    def __init__(self, guild_id: int, parent_view: "WarningSettingView") -> None:
+    def __init__(
+        self, guild_id: int, parent_view: "WarningSettingView", draft_store: WarningDraftStore
+    ) -> None:
         self.guild_id = guild_id
         self.parent_view = parent_view
+        self.draft_store = draft_store
 
         options = [
             discord.SelectOption(label=i18n.get_text("ui.add_warning", guild_id), value="add"),
@@ -620,6 +660,7 @@ class WarningActionSelect(discord.ui.Select):
                     interaction.user.id,
                     session_key,
                     self.parent_view,
+                    self.draft_store,
                 )
             )
         else:
@@ -630,7 +671,7 @@ class WarningActionSelect(discord.ui.Select):
                 await interaction.response.send_message(error_message, ephemeral=True)
                 return
 
-            view = WarningSelectionView(self.guild_id, selected_value, self.parent_view)
+            view = WarningSelectionView(self.guild_id, selected_value, self.parent_view, self.draft_store)
             target_prompt = i18n.get_text("messages.select_target_prompt", self.guild_id)
             await interaction.response.edit_message(content=target_prompt, embed=None, view=view)
 
@@ -643,25 +684,27 @@ class WarningSettingView(discord.ui.View):
     定時提醒設定的主面板視圖。
     """
 
-    def __init__(self, guild_id: int, page: int = 0) -> None:
+    def __init__(self, guild_id: int, draft_store: WarningDraftStore, page: int = 0) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.guild_id = guild_id
-        warning_count = len(get_warnings(guild_id))
-        self.total_pages = max(1, (warning_count + WARNING_PAGE_SIZE - 1) // WARNING_PAGE_SIZE)
-        self.page = min(max(page, 0), self.total_pages - 1)
+        self.draft_store = draft_store
+        page_state = WarningPageState(len(get_warnings(guild_id)), WARNING_PAGE_SIZE, page)
+        self.page_state = page_state
+        self.total_pages = page_state.total_pages
+        self.page = page_state.page
         self._build_items()
 
     def _build_items(self) -> None:
         self.clear_items()
-        self.add_item(WarningActionSelect(self.guild_id, self))
-        if self.page > 0:
+        self.add_item(WarningActionSelect(self.guild_id, self, self.draft_store))
+        if self.page_state.has_previous:
             previous_button = discord.ui.Button(
                 label=i18n.get_text("ui.previous_page", self.guild_id),
                 style=discord.ButtonStyle.secondary,
             )
             previous_button.callback = self.previous_page
             self.add_item(previous_button)
-        if self.page < self.total_pages - 1:
+        if self.page_state.has_next:
             next_button = discord.ui.Button(
                 label=i18n.get_text("ui.next_page", self.guild_id),
                 style=discord.ButtonStyle.secondary,
@@ -670,11 +713,11 @@ class WarningSettingView(discord.ui.View):
             self.add_item(next_button)
 
     async def previous_page(self, interaction: discord.Interaction) -> None:
-        view = WarningSettingView(self.guild_id, self.page - 1)
+        view = WarningSettingView(self.guild_id, self.draft_store, self.page - 1)
         await interaction.response.edit_message(embed=view.get_embed(), view=view)
 
     async def next_page(self, interaction: discord.Interaction) -> None:
-        view = WarningSettingView(self.guild_id, self.page + 1)
+        view = WarningSettingView(self.guild_id, self.draft_store, self.page + 1)
         await interaction.response.edit_message(embed=view.get_embed(), view=view)
 
     def get_embed(self) -> discord.Embed:
