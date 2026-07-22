@@ -39,9 +39,6 @@ class PeopleCountChannelSelect(discord.ui.ChannelSelect):
         await GuildSettings.set_module_config(
             self.guild_id, "people_counting", "channel_id", str(channel.id)
         )
-        await GuildSettings.set_module_config(
-            self.guild_id, "people_counting", "last_count", member_count
-        )
 
         try:
             new_name = i18n.get_text(
@@ -50,23 +47,27 @@ class PeopleCountChannelSelect(discord.ui.ChannelSelect):
                 count=member_count,
             )
             await channel.edit(name=new_name)
-
-            success_message = i18n.get_text(
-                "messages.set_count_success",
-                self.guild_id,
-                channel=channel.mention,
-                count=member_count,
-            )
-            embed = discord.Embed(
-                title=i18n.get_text("messages.title_setting_success", self.guild_id),
-                description=success_message,
-                color=discord.Color.green(),
-            )
-            await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
-            await interaction.followup.send(embed=embed, ephemeral=True)
         except Exception as e:
             logger.error(f"更新人數統計頻道失敗：{e}", exc_info=True)
-            error_message = i18n.get_text("messages.error_setting_failed", self.guild_id)
+            error_message = i18n.get_text("messages.people_counting_update_retry", self.guild_id)
             await interaction.response.send_message(error_message, ephemeral=True)
+            return
+
+        await GuildSettings.set_module_config(
+            self.guild_id, "people_counting", "last_count", member_count
+        )
+        success_message = i18n.get_text(
+            "messages.set_count_success",
+            self.guild_id,
+            channel=channel.mention,
+            count=member_count,
+        )
+        embed = discord.Embed(
+            title=i18n.get_text("messages.title_setting_success", self.guild_id),
+            description=success_message,
+            color=discord.Color.green(),
+        )
+        await interaction.response.edit_message(embed=self.parent_view.get_embed(), view=self.parent_view)
+        await interaction.followup.send(embed=embed, ephemeral=True)
 
 

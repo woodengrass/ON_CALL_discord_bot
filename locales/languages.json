@@ -1296,6 +1296,11 @@
       "zh-CN": " 已将人数频道设定为 {channel}，目前人数：{count}",
       "en-US": " People count channel set to {channel}, current count: {count}"
     },
+    "people_counting_update_retry": {
+      "zh-TW": " 人數統計頻道已設定，但目前無法更新名稱；系統將自動重試。",
+      "zh-CN": " 人数统计频道已设定，但目前无法更新名称；系统将自动重试。",
+      "en-US": " The people count channel is saved, but its name could not be updated. The bot will retry automatically."
+    },
     "error_perm_channel_name": {
       "zh-TW": " 權限不足，無法修改頻道名稱。",
       "zh-CN": " 权限不足，无法修改频道名称。",
