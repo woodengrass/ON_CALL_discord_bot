@@ -9,21 +9,28 @@ from core.ui_constants import PANEL_TIMEOUT_SECONDS
 logger = logging.getLogger(__name__)
 
 
-class RestrictedRoleSelect(discord.ui.RoleSelect):
+class VerificationRoleConfigSelect(discord.ui.RoleSelect):
     """
-    待驗證身分組選擇器。
+    驗證系統身分組設定選擇器。
     """
 
-    def __init__(self, guild_id: int, parent_view: "VerificationSettingView") -> None:
+    def __init__(
+        self,
+        guild_id: int,
+        parent_view: "VerificationSettingView",
+        config_key: str,
+        placeholder_key: str,
+    ) -> None:
         self.guild_id = guild_id
         self.parent_view = parent_view
+        self.config_key = config_key
         super().__init__(
-            placeholder=i18n.get_text("ui.verification_select_restricted_role", guild_id), min_values=1, max_values=1
+            placeholder=i18n.get_text(placeholder_key, guild_id), min_values=1, max_values=1
         )
 
     async def callback(self, interaction: discord.Interaction) -> None:
         role = self.values[0]
-        await GuildSettings.set_module_config(self.guild_id, "verification", "restricted_role_id", role.id)
+        await GuildSettings.set_module_config(self.guild_id, "verification", self.config_key, role.id)
         await interaction.response.edit_message(
             content=None, embed=self.parent_view.get_embed(), view=self.parent_view
         )
@@ -32,53 +39,7 @@ class RestrictedRoleSelect(discord.ui.RoleSelect):
         )
 
 
-class VerifiedRoleSelect(discord.ui.RoleSelect):
-    """
-    已驗證身分組選擇器。
-    """
-
-    def __init__(self, guild_id: int, parent_view: "VerificationSettingView") -> None:
-        self.guild_id = guild_id
-        self.parent_view = parent_view
-        super().__init__(
-            placeholder=i18n.get_text("ui.verification_select_verified_role", guild_id), min_values=1, max_values=1
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        role = self.values[0]
-        await GuildSettings.set_module_config(self.guild_id, "verification", "verified_role_id", role.id)
-        await interaction.response.edit_message(
-            content=None, embed=self.parent_view.get_embed(), view=self.parent_view
-        )
-        await interaction.followup.send(
-            i18n.get_text("messages.verification_setting_success", self.guild_id), ephemeral=True
-        )
-
-
-class ReviewRoleSelect(discord.ui.RoleSelect):
-    """
-    審核人員身分組選擇器（選填），該身分組成員可以檢視並處理私人審核頻道。
-    """
-
-    def __init__(self, guild_id: int, parent_view: "VerificationSettingView") -> None:
-        self.guild_id = guild_id
-        self.parent_view = parent_view
-        super().__init__(
-            placeholder=i18n.get_text("ui.verification_select_review_role", guild_id), min_values=1, max_values=1
-        )
-
-    async def callback(self, interaction: discord.Interaction) -> None:
-        role = self.values[0]
-        await GuildSettings.set_module_config(self.guild_id, "verification", "review_role_id", role.id)
-        await interaction.response.edit_message(
-            content=None, embed=self.parent_view.get_embed(), view=self.parent_view
-        )
-        await interaction.followup.send(
-            i18n.get_text("messages.verification_setting_success", self.guild_id), ephemeral=True
-        )
-
-
-class VerifyChannelSelect(discord.ui.ChannelSelect):
+class VerificationChannelConfigSelect(discord.ui.ChannelSelect):
     """
     驗證頻道選擇器（放置「我是人類」按鈕面板的頻道）。
     """
@@ -246,7 +207,14 @@ class VerificationSettingSelect(discord.ui.Select):
 
         if selected_value == "restricted_role":
             view = VerificationSubView(
-                self.guild_id, RestrictedRoleSelect(self.guild_id, self.parent_view), self.parent_view
+                self.guild_id,
+                VerificationRoleConfigSelect(
+                    self.guild_id,
+                    self.parent_view,
+                    "restricted_role_id",
+                    "ui.verification_select_restricted_role",
+                ),
+                self.parent_view,
             )
             await interaction.response.edit_message(
                 content=i18n.get_text("ui.verification_select_restricted_role", self.guild_id), embed=None, view=view
@@ -254,7 +222,14 @@ class VerificationSettingSelect(discord.ui.Select):
 
         elif selected_value == "verified_role":
             view = VerificationSubView(
-                self.guild_id, VerifiedRoleSelect(self.guild_id, self.parent_view), self.parent_view
+                self.guild_id,
+                VerificationRoleConfigSelect(
+                    self.guild_id,
+                    self.parent_view,
+                    "verified_role_id",
+                    "ui.verification_select_verified_role",
+                ),
+                self.parent_view,
             )
             await interaction.response.edit_message(
                 content=i18n.get_text("ui.verification_select_verified_role", self.guild_id), embed=None, view=view
@@ -262,7 +237,14 @@ class VerificationSettingSelect(discord.ui.Select):
 
         elif selected_value == "review_role":
             view = VerificationSubView(
-                self.guild_id, ReviewRoleSelect(self.guild_id, self.parent_view), self.parent_view
+                self.guild_id,
+                VerificationRoleConfigSelect(
+                    self.guild_id,
+                    self.parent_view,
+                    "review_role_id",
+                    "ui.verification_select_review_role",
+                ),
+                self.parent_view,
             )
             await interaction.response.edit_message(
                 content=i18n.get_text("ui.verification_select_review_role", self.guild_id), embed=None, view=view
@@ -270,7 +252,7 @@ class VerificationSettingSelect(discord.ui.Select):
 
         elif selected_value == "verify_channel":
             view = VerificationSubView(
-                self.guild_id, VerifyChannelSelect(self.guild_id, self.parent_view), self.parent_view
+                self.guild_id, VerificationChannelConfigSelect(self.guild_id, self.parent_view), self.parent_view
             )
             await interaction.response.edit_message(
                 content=i18n.get_text("ui.verification_select_channel", self.guild_id), embed=None, view=view
