@@ -1191,6 +1191,11 @@
       "zh-CN": " 服务器目前没有任何排程，无法执行此操作！",
       "en-US": " This server has no schedules yet, cannot perform this action!"
     },
+    "error_warning_not_found": {
+      "zh-TW": " 找不到指定的排程提醒，可能已被刪除。",
+      "zh-CN": " 找不到指定的定时提醒，可能已被删除。",
+      "en-US": " The selected scheduled reminder was not found and may have been deleted."
+    },
     "select_target_prompt": {
       "zh-TW": " 請選擇目標項目：",
       "zh-CN": " 请选择目标项目：",

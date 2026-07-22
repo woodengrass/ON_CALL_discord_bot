@@ -311,6 +311,25 @@ def test_warning_page_state_clamps_page(
     assert page_state.total_pages == total_pages
 
 
+@pytest.mark.asyncio
+async def test_toggle_missing_warning_acknowledges_interaction(monkeypatch: pytest.MonkeyPatch) -> None:
+    """選取後提醒遭刪除時，toggle callback 仍應回覆操作失敗。"""
+    monkeypatch.setattr(panel.WarningStore, "data", {"warning-1": {"guild_id": 100}})
+    toggle_warning = AsyncMock(return_value=None)
+    monkeypatch.setattr(panel.WarningStore, "toggle_warning", toggle_warning)
+    parent_view = MagicMock(page=0)
+    warning_select = panel.WarningListSelect(100, "toggle", parent_view, 0)
+    warning_select._values = ["warning-1"]
+    interaction = _make_interaction(100, 200)
+
+    await warning_select.callback(interaction)
+
+    toggle_warning.assert_awaited_once_with("warning-1")
+    interaction.response.send_message.assert_awaited_once()
+    interaction.response.edit_message.assert_not_awaited()
+    interaction.followup.send.assert_not_awaited()
+
+
 @pytest.mark.parametrize("value", ["00:00", "09:05", "23:59", " 12:30 "])
 def test_parse_schedule_time_accepts_valid_24_hour_time(value: str) -> None:
     """合法的 24 小時制時間應通過驗證。"""

@@ -558,6 +558,8 @@ class WarningListSelect(discord.ui.Select):
         elif self.action == "toggle":
             active = await WarningStore.toggle_warning(warning_id)
             if active is None:
+                error_message = i18n.get_text("messages.error_warning_not_found", self.guild_id)
+                await interaction.response.send_message(error_message, ephemeral=True)
                 return
             status_text = i18n.get_text(
                 "labels.warning_active" if active else "labels.warning_paused", self.guild_id
