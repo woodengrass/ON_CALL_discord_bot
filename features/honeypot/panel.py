@@ -4,6 +4,7 @@ from discord.ext import commands
 from core.guild_settings import GuildSettings
 from core.i18n import i18n
 from core.ui_constants import PANEL_TIMEOUT_SECONDS
+from core.ui_navigation import BackCallback
 
 
 def get_banned_log_embed(guild_id: int, bot: commands.Bot) -> discord.Embed:
@@ -84,8 +85,9 @@ class HoneypotComponentView(discord.ui.View):
 class HoneypotMenuSelect(discord.ui.Select):
     """蜜罐系統設定子選單。"""
 
-    def __init__(self, guild_id: int) -> None:
+    def __init__(self, guild_id: int, on_back: BackCallback) -> None:
         self.guild_id = guild_id
+        self.on_back = on_back
         options = [
             discord.SelectOption(label=i18n.get_text("ui.set_honeypot", guild_id), value="set"),
             discord.SelectOption(label=i18n.get_text("ui.view_banned_texts", guild_id), value="logs"),
@@ -96,12 +98,9 @@ class HoneypotMenuSelect(discord.ui.Select):
     async def callback(self, interaction: discord.Interaction) -> None:
         selected_value = self.values[0]
         if selected_value == "back":
-            from hubs.anti_fraud.panel import AntiFraudView
-            await interaction.response.edit_message(
-                content=None, embed=None, view=AntiFraudView(self.guild_id)
-            )
+            await self.on_back(interaction)
         elif selected_value == "set":
-            parent_view = HoneypotSettingView(self.guild_id)
+            parent_view = HoneypotSettingView(self.guild_id, self.on_back)
             view = HoneypotComponentView(
                 self.guild_id, HoneypotChannelSelect(self.guild_id, parent_view), parent_view
             )
@@ -111,13 +110,13 @@ class HoneypotMenuSelect(discord.ui.Select):
         elif selected_value == "logs":
             embed = get_banned_log_embed(self.guild_id, interaction.client)
             await interaction.response.edit_message(
-                content=None, embed=embed, view=HoneypotSettingView(self.guild_id)
+                content=None, embed=embed, view=HoneypotSettingView(self.guild_id, self.on_back)
             )
 
 
 class HoneypotSettingView(discord.ui.View):
     """蜜罐系統設定子選單容器。"""
 
-    def __init__(self, guild_id: int) -> None:
+    def __init__(self, guild_id: int, on_back: BackCallback) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
-        self.add_item(HoneypotMenuSelect(guild_id))
+        self.add_item(HoneypotMenuSelect(guild_id, on_back))

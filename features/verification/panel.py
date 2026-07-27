@@ -5,6 +5,7 @@ import discord
 from core.guild_settings import GuildSettings
 from core.i18n import i18n
 from core.ui_constants import PANEL_TIMEOUT_SECONDS
+from core.ui_navigation import BackCallback
 
 logger = logging.getLogger(__name__)
 
@@ -127,7 +128,7 @@ class VerificationLockdownConfirmView(discord.ui.View):
             or restricted_role is None
             or not isinstance(verify_channel, discord.TextChannel)
         ):
-            updated_view = VerificationSettingView(self.guild_id)
+            updated_view = VerificationSettingView(self.guild_id, self.parent_view.on_back)
             await interaction.edit_original_response(content=None, embed=updated_view.get_embed(), view=updated_view)
             await interaction.followup.send(
                 i18n.get_text("messages.verification_lockdown_failed", self.guild_id), ephemeral=True
@@ -143,7 +144,7 @@ class VerificationLockdownConfirmView(discord.ui.View):
         )
 
         if not result["success"]:
-            updated_view = VerificationSettingView(self.guild_id)
+            updated_view = VerificationSettingView(self.guild_id, self.parent_view.on_back)
             await interaction.edit_original_response(content=None, embed=updated_view.get_embed(), view=updated_view)
             message_key = (
                 "messages.verification_lockdown_rollback_failed"
@@ -155,7 +156,7 @@ class VerificationLockdownConfirmView(discord.ui.View):
 
         await GuildSettings.set_module_config(self.guild_id, "verification", "enabled", True)
 
-        updated_view = VerificationSettingView(self.guild_id)
+        updated_view = VerificationSettingView(self.guild_id, self.parent_view.on_back)
         await interaction.edit_original_response(content=None, embed=updated_view.get_embed(), view=updated_view)
         await interaction.followup.send(
             i18n.get_text(
@@ -310,16 +311,17 @@ class VerificationSettingView(discord.ui.View):
     驗證系統設定面板的主視圖。
     """
 
-    def __init__(self, guild_id: int) -> None:
+    def __init__(self, guild_id: int, on_back: BackCallback) -> None:
         super().__init__(timeout=PANEL_TIMEOUT_SECONDS)
         self.guild_id = guild_id
+        self.on_back = on_back
         self.add_item(VerificationSettingSelect(guild_id, self))
         self.add_item(self._create_toggle_button())
         self.add_item(self._create_back_button())
 
     def _create_back_button(self) -> discord.ui.Button:
         """
-        建立返回反詐騙主選單的按鈕。
+        建立返回上層面板的按鈕。
 
         Returns:
             設定好回呼的按鈕元件
@@ -327,18 +329,17 @@ class VerificationSettingView(discord.ui.View):
         button = discord.ui.Button(
             label=i18n.get_text("ui.back", self.guild_id), style=discord.ButtonStyle.secondary
         )
-        button.callback = self.back_to_anti_fraud_menu
+        button.callback = self.back_to_main
         return button
 
-    async def back_to_anti_fraud_menu(self, interaction: discord.Interaction) -> None:
+    async def back_to_main(self, interaction: discord.Interaction) -> None:
         """
-        返回反詐騙設定主選單。
+        執行注入的上層面板返回操作。
 
         Args:
             interaction: 觸發返回的互動物件
         """
-        from hubs.anti_fraud.panel import AntiFraudView
-        await interaction.response.edit_message(content=None, embed=None, view=AntiFraudView(self.guild_id))
+        await self.on_back(interaction)
 
     def _create_toggle_button(self) -> discord.ui.Button:
         config = GuildSettings.get_module_config(self.guild_id, "verification")
@@ -364,7 +365,7 @@ class VerificationSettingView(discord.ui.View):
         if config.get("enabled", False):
             # 關閉不需要確認，也不會自動復原頻道權限
             await GuildSettings.set_module_config(self.guild_id, "verification", "enabled", False)
-            updated_view = VerificationSettingView(self.guild_id)
+            updated_view = VerificationSettingView(self.guild_id, self.on_back)
             await interaction.response.edit_message(embed=updated_view.get_embed(), view=updated_view)
             status = i18n.get_text("ui.state_off", self.guild_id)
             await interaction.followup.send(
