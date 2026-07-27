@@ -29,6 +29,32 @@ async def set_pending(guild_id: int, user_id: int, risk_score: int) -> None:
     await db.commit()
 
 
+async def create_pending(guild_id: int, user_id: int, risk_score: int) -> bool:
+    """
+    僅在尚無驗證紀錄時建立一筆待驗證紀錄，避免並行按鈕點擊覆寫既有流程狀態。
+
+    Args:
+        guild_id: 伺服器 ID
+        user_id: 使用者 ID
+        risk_score: 計算出的風險分數
+
+    Returns:
+        True 表示成功建立；已有紀錄時回傳 False
+    """
+    db = get_db()
+    joined_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
+    cursor = await db.execute(
+        """
+        INSERT INTO pending_verifications (guild_id, user_id, joined_at, risk_score, status)
+        VALUES (?, ?, ?, ?, 'pending')
+        ON CONFLICT (guild_id, user_id) DO NOTHING
+        """,
+        (guild_id, user_id, joined_at, risk_score),
+    )
+    await db.commit()
+    return cursor.rowcount > 0
+
+
 async def get_entry(guild_id: int, user_id: int) -> dict | None:
     """
     取得指定成員的驗證紀錄。

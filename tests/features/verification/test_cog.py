@@ -134,3 +134,108 @@ async def test_open_review_channel_cleans_up_when_message_send_fails(
     review_channel.delete.assert_awaited_once()
     reset_review_creation.assert_awaited_once_with(100, 200)
     complete_review_creation.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_human_check_recovers_missing_entry_with_restricted_role(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    Bot 離線期間加入且沒有紀錄的未驗證成員點擊按鈕時，應補上待驗證身分組與 pending 紀錄。
+    """
+    restricted_role = object()
+    verified_role = object()
+    member = SimpleNamespace(id=200, roles=[], add_roles=AsyncMock())
+    response = SimpleNamespace(send_message=AsyncMock())
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=100, get_role=lambda role_id: {1: restricted_role, 2: verified_role}.get(role_id)),
+        user=member,
+        response=response,
+    )
+    monkeypatch.setattr(verification_cog, "get_entry", AsyncMock(return_value=None))
+    create_pending = AsyncMock(return_value=True)
+    monkeypatch.setattr(verification_cog, "create_pending", create_pending)
+    monkeypatch.setattr(verification_cog, "calculate_risk_score", MagicMock(return_value=2))
+    monkeypatch.setattr(verification_cog, "claim_review_creation", AsyncMock(return_value=False))
+    monkeypatch.setattr(verification_cog.i18n, "get_text", MagicMock(return_value="text"))
+
+    verification = object.__new__(verification_cog.Verification)
+    verification.get_config = MagicMock(return_value={
+        "enabled": True,
+        "restricted_role_id": 1,
+        "verified_role_id": 2,
+        "risk_threshold": 2,
+    })
+
+    await verification._handle_human_check(interaction)
+
+    member.add_roles.assert_awaited_once_with(restricted_role, reason="text")
+    create_pending.assert_awaited_once_with(100, 200, 2)
+    response.send_message.assert_awaited_once_with("text", ephemeral=True)
+
+
+@pytest.mark.asyncio
+async def test_human_check_preserves_unrecorded_verified_member(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    沒有紀錄但已具已驗證身分組的成員不應被降為待驗證或重建 pending 紀錄。
+    """
+    restricted_role = object()
+    verified_role = object()
+    member = SimpleNamespace(id=200, roles=[verified_role], add_roles=AsyncMock())
+    response = SimpleNamespace(send_message=AsyncMock())
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=100, get_role=lambda role_id: {1: restricted_role, 2: verified_role}.get(role_id)),
+        user=member,
+        response=response,
+    )
+    create_pending = AsyncMock()
+    monkeypatch.setattr(verification_cog, "get_entry", AsyncMock(return_value=None))
+    monkeypatch.setattr(verification_cog, "create_pending", create_pending)
+    monkeypatch.setattr(verification_cog.i18n, "get_text", MagicMock(return_value="approved"))
+
+    verification = object.__new__(verification_cog.Verification)
+    verification.get_config = MagicMock(return_value={
+        "enabled": True,
+        "restricted_role_id": 1,
+        "verified_role_id": 2,
+    })
+
+    await verification._handle_human_check(interaction)
+
+    member.add_roles.assert_not_awaited()
+    create_pending.assert_not_awaited()
+    response.send_message.assert_awaited_once_with("approved", ephemeral=True)
+
+
+@pytest.mark.asyncio
+async def test_human_check_does_not_create_entry_when_restricted_role_addition_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """
+    補發待驗證身分組失敗時不得建立 pending 紀錄，避免未受限制的成員被視為驗證中。
+    """
+    restricted_role = object()
+    verified_role = object()
+    member = SimpleNamespace(id=200, roles=[], add_roles=AsyncMock(side_effect=RuntimeError("role failed")))
+    response = SimpleNamespace(send_message=AsyncMock())
+    interaction = SimpleNamespace(
+        guild=SimpleNamespace(id=100, get_role=lambda role_id: {1: restricted_role, 2: verified_role}.get(role_id)),
+        user=member,
+        response=response,
+    )
+    create_pending = AsyncMock()
+    monkeypatch.setattr(verification_cog, "get_entry", AsyncMock(return_value=None))
+    monkeypatch.setattr(verification_cog, "create_pending", create_pending)
+    monkeypatch.setattr(verification_cog.i18n, "get_text", MagicMock(return_value="role error"))
+
+    verification = object.__new__(verification_cog.Verification)
+    verification.get_config = MagicMock(return_value={
+        "enabled": True,
+        "restricted_role_id": 1,
+        "verified_role_id": 2,
+    })
+
+    await verification._handle_human_check(interaction)
+
+    create_pending.assert_not_awaited()
+    response.send_message.assert_awaited_once_with("role error", ephemeral=True)
