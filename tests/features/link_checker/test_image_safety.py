@@ -125,7 +125,7 @@ async def test_message_processes_images_sequentially_and_deletes_temp_files(
     checker._download_image_attachment = AsyncMock(side_effect=download)
     monkeypatch.setattr(link_checker_cog.asyncio, "to_thread", process_in_thread)
     message = SimpleNamespace(
-        author=SimpleNamespace(bot=False),
+        author=SimpleNamespace(id=200, bot=False),
         guild=SimpleNamespace(id=100),
         content="",
         attachments=[
