@@ -112,3 +112,50 @@ async def test_same_user_same_guild_repeat_content_is_detected(monkeypatch: pyte
     await cog.on_message(repeat_message)
 
     repeat_message.delete.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_whitelisted_user_does_not_trigger_honeypot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    共用白名單中的使用者在蜜罐頻道發言時不應被記錄或刪除訊息。
+    """
+    settings = SimpleNamespace(
+        get_module_config=lambda guild_id, module_name: {"channel_id": "900"},
+        get_log_channel=lambda guild_id: None,
+        get_whitelist=lambda guild_id: ["300"],
+    )
+    monkeypatch.setattr(honeypot_cog, "GuildSettings", settings)
+
+    cog = object.__new__(HoneypotMonitor)
+    cog.bot = SimpleNamespace(get_channel=lambda channel_id: None)
+    cog.user_messages = {}
+    message = _make_message(100, 900, 300, "管理公告")
+
+    await cog.on_message(message)
+
+    assert cog.user_messages == {}
+    message.delete.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_non_whitelisted_owner_triggers_honeypot(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    伺服器擁有者未列入共用白名單時，應和其他使用者套用相同的蜜罐規則。
+    """
+    settings = SimpleNamespace(
+        get_module_config=lambda guild_id, module_name: {"channel_id": "900"},
+        get_log_channel=lambda guild_id: None,
+        get_whitelist=lambda guild_id: [],
+    )
+    monkeypatch.setattr(honeypot_cog, "GuildSettings", settings)
+
+    cog = object.__new__(HoneypotMonitor)
+    cog.bot = SimpleNamespace(get_channel=lambda channel_id: None)
+    cog.user_messages = {}
+    message = _make_message(100, 900, 300, "管理公告")
+    message.guild.owner = message.author
+
+    await cog.on_message(message)
+
+    assert message.content in cog.user_messages[(100, 300)]
+    message.delete.assert_awaited_once()

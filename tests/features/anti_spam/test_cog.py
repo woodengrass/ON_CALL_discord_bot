@@ -62,6 +62,24 @@ async def test_non_allowed_channel_is_recorded(monkeypatch: pytest.MonkeyPatch) 
     assert len(cog.message_history[(100, 200)]) == 1
 
 
+@pytest.mark.asyncio
+async def test_whitelisted_user_is_not_recorded(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    共用白名單中的使用者不應進入防洗版歷史紀錄。
+    """
+    settings = SimpleNamespace(
+        get_module_config=lambda guild_id, module_name: {"enabled": True},
+        get_whitelist=lambda guild_id: ["200"],
+    )
+    monkeypatch.setattr(anti_spam_cog, "GuildSettings", settings)
+    cog = object.__new__(AntiSpam)
+    cog.message_history = {}
+
+    await cog.on_message(_make_message(301))
+
+    assert cog.message_history == {}
+
+
 def _make_repeat_message(guild_id: int, channel_id: int, user_id: int) -> SimpleNamespace:
     """
     建立同頻道重複洗版測試所需的最小訊息物件。
