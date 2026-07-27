@@ -4,10 +4,23 @@ core/database.py 的舊資料庫升級測試：驗證 _add_column_if_missing() �
 且既有資料不會被升級過程弄丟。
 """
 
+from pathlib import Path
+
 import aiosqlite
 import pytest
 
 from core import database
+
+
+def test_resolve_db_path_is_independent_of_working_directory(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """平台預設與相對覆寫路徑都必須以平台根目錄解析。"""
+    monkeypatch.chdir(tmp_path)
+
+    assert database.resolve_db_path(None) == database.DEFAULT_DB_PATH.resolve()
+    assert database.resolve_db_path("custom/platform.db") == (database.PROJECT_ROOT / "custom/platform.db").resolve()
 
 
 @pytest.fixture

@@ -1,9 +1,33 @@
+import logging
 import os
 import re
+from pathlib import Path
 
 import aiosqlite
 
-DB_PATH = "data/bot.db"
+logger = logging.getLogger(__name__)
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DB_PATH = PROJECT_ROOT / "data" / "bot.db"
+
+
+def resolve_db_path(configured_path: str | None) -> Path:
+    """
+    將資料庫設定值解析為固定的絕對路徑，避免受啟動工作目錄影響。
+
+    Args:
+        configured_path: 環境變數提供的路徑；未設定時使用專案預設路徑
+
+    Returns:
+        已解析的絕對資料庫路徑
+    """
+    database_path = Path(configured_path) if configured_path else DEFAULT_DB_PATH
+    if not database_path.is_absolute():
+        database_path = PROJECT_ROOT / database_path
+    return database_path.resolve()
+
+
+DB_PATH = resolve_db_path(os.getenv("BOT_DB_PATH"))
 
 _connection: aiosqlite.Connection | None = None
 
@@ -13,8 +37,10 @@ async def init_db() -> None:
     初始化資料庫連線並建立所需的資料表，機器人啟動時只需呼叫一次。
     """
     global _connection
-    os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
-    _connection = await aiosqlite.connect(DB_PATH)
+    database_path = Path(DB_PATH)
+    database_path.parent.mkdir(parents=True, exist_ok=True)
+    logger.info("使用資料庫路徑：%s", database_path.resolve())
+    _connection = await aiosqlite.connect(str(database_path))
     await _connection.execute("PRAGMA journal_mode=WAL")
 
     await _connection.execute(
